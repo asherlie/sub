@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS= -Wall -Wextra -Wpedantic -Werror -O3 -lpthread
 pwd=$(pwd)
 
-all: sub explore
+all: sub gtfs_req
 
 transit:
 	git clone https://github.com/google/transit
@@ -16,5 +16,5 @@ gtfs-realtime.pb-c.h: gtfs-realtime.proto
 sub: sub.c gtfs-realtime.pb-c.h
 	$(CC) $(CFLAGS) sub.c gtfs-realtime.pb-c.c -o sub -lprotobuf-c
 
-explore: explore.c
-	$(CC) $(CFLAGS) explore.c -lcurl -o ex
+gtfs_req: gtfs_req.c
+	$(CC) $(CFLAGS) gtfs_req.c -lcurl -o gtfs_req 
