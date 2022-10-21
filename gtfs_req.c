@@ -34,7 +34,7 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     memcpy(mem->response+mem->sz, buf, bytes);
     mem->sz += bytes;
 
-    /*printf("recvd %i total bytes, cap: %i\n", mem->sz, mem->cap);*/
+    /*printf("recvd %li total bytes, cap: %li\n", mem->sz, mem->cap);*/
     return size*nmemb;
 }
 
@@ -66,13 +66,18 @@ void prep_curl(CURL* curl, char* header, struct buildbuf* bb){
 
 uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
     struct buildbuf bb;
+    CURLcode status;
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
 
     init_buildbuf(&bb, 0);
+    // some of the contents of prep_curl() shouldn't occur more than once
+    //  header
+    //  CURLOPT_WRITEFUNCTION
     prep_curl(curl, "x-api-key: 3Mna5AMSgo15Cd41NJ61OaeqgzjezcMb4HxCQH5J", &bb);
 
-    if(res)*res = curl_easy_perform(curl);
+    status = curl_easy_perform(curl);
+    if(res)*res = status;
     *len = bb.sz;
 
     return bb.response;
@@ -82,6 +87,7 @@ uint8_t* mta_request(struct mta_req* mr, enum train line, int* len){
     char url[100] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
 
     memcpy(url+65, url_lookup[line], url_lookup_len[line]);
+    puts(url);
     return curl_request(mr->curl, url, len, NULL);
 }
 
@@ -91,7 +97,10 @@ int main(){
     struct mta_req* mr = setup_mr();
 
     int len;
-    CURLcode res;
+    for(int i = ACE; i <= NUMBERS; ++i){
+        mta_request(mr, i, &len);
+        printf("read %i bytes\n", len);
+    }
 
     /*
      * for(int i = 0; i < 10; ++i){

@@ -23,3 +23,4 @@ struct mta_req* setup_mr();
 void cleanup_mr(struct mta_req* mr);
 uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res);
 
+uint8_t* mta_request(struct mta_req* mr, enum train line, int* len);
