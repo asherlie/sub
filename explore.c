@@ -32,7 +32,7 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     memcpy(mem->response+mem->sz, buf, bytes);
     mem->sz += bytes;
 
-    printf("recvd %i total bytes, cap: %i\n", mem->sz, mem->cap);
+    /*printf("recvd %i total bytes, cap: %i\n", mem->sz, mem->cap);*/
     return size*nmemb;
 }
 
@@ -52,7 +52,7 @@ void prep_curl(CURL* curl, char* header, struct buildbuf* bb){
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 }
 
-uint8_t* curl_request(CURL* curl, char* url, CURLcode* res){
+uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
     struct buildbuf bb;
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -61,6 +61,7 @@ uint8_t* curl_request(CURL* curl, char* url, CURLcode* res){
     prep_curl(curl, "x-api-key: 3Mna5AMSgo15Cd41NJ61OaeqgzjezcMb4HxCQH5J", &bb);
 
     *res = curl_easy_perform(curl);
+    *len = bb.sz;
 }
 
 // how do i do multiple curl_request calls? need to refresh bb, keep everythign else the same
@@ -72,9 +73,11 @@ int main(){
     /*prep_curl(curl, url);*/
     /*struct curl_slist* headers = NULL;*/
     /*struct buildbuf bb;*/
+    int len;
     CURLcode res;
 
-    curl_request(curl, url, &res);
+    curl_request(curl, url, &len, &res);
+    printf("res: %i, read %i bytes\n", res, len);
 
     /*init_buildbuf(&bb, 10);*/
 
