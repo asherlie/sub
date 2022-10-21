@@ -7,7 +7,7 @@
 
 struct buildbuf{
     uint8_t* response;
-    int sz, cap;
+    size_t sz, cap;
 };
 
 void init_buildbuf(struct buildbuf* bb, int cap){
@@ -62,6 +62,8 @@ uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
 
     *res = curl_easy_perform(curl);
     *len = bb.sz;
+
+    return bb.response;
 }
 
 // how do i do multiple curl_request calls? need to refresh bb, keep everythign else the same
@@ -70,29 +72,14 @@ int main(){
     char url[] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
     CURL* curl = setup_curl();
 
-    /*prep_curl(curl, url);*/
-    /*struct curl_slist* headers = NULL;*/
-    /*struct buildbuf bb;*/
     int len;
     CURLcode res;
 
-    curl_request(curl, url, &len, &res);
-    printf("res: %i, read %i bytes\n", res, len);
+    for(int i = 0; i < 10; ++i){
+        free(curl_request(curl, url, &len, &res));
+        printf("res: %i, read %i bytes\n", res, len);
+    }
 
-    /*init_buildbuf(&bb, 10);*/
-
-    /*
-     * curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_writefunc);
-     * curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&bb);
-     * curl_easy_setopt(curl, CURLOPT_URL, url);
-     * [>headers = curl_slist_append(headers, );<]
-     * curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-     * res = curl_easy_perform(curl);
-     * if(res == CURLE_OK){
-     *     puts("OKAY");
-     * }
-    */
-    /*curl_slist_free_all(headers);*/
     curl_easy_cleanup(curl);
     curl_global_cleanup();
 }
