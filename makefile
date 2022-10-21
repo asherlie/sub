@@ -16,3 +16,5 @@ gtfs-realtime.pb-c.h: gtfs-realtime.proto
 sub: sub.c gtfs-realtime.pb-c.h
 	$(CC) sub.c gtfs-realtime.pb-c.c -o sub -lprotobuf-c
 
+explore: explore.c
+	$(CC) explore.c -lcurl -o ex
