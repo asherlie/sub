@@ -5,6 +5,8 @@
 #include <sys/param.h>
 #include <curl/curl.h>
 
+#include "gtfs_req.h"
+
 struct buildbuf{
     uint8_t* response;
     size_t sz, cap;
@@ -36,10 +38,20 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     return size*nmemb;
 }
 
-CURL* setup_curl(){
+/*CURL* setup_curl(){*/
+struct mta_req* setup_mr(){
+    struct mta_req* mr = malloc(sizeof(struct mta_req));
     /*curl_global_init(CURL_GLOBAL_ALL);*/
     curl_global_init(CURL_GLOBAL_DEFAULT);
-    return curl_easy_init();
+    mr->curl = curl_easy_init();
+    return mr;
+}
+
+void cleanup_mr(struct mta_req* mr){
+    curl_slist_free_all(mr->hdr);
+    curl_easy_cleanup(mr->curl);
+    curl_global_cleanup();
+    free(mr);
 }
 
 void prep_curl(CURL* curl, char* header, struct buildbuf* bb){
@@ -60,26 +72,33 @@ uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
     init_buildbuf(&bb, 0);
     prep_curl(curl, "x-api-key: 3Mna5AMSgo15Cd41NJ61OaeqgzjezcMb4HxCQH5J", &bb);
 
-    *res = curl_easy_perform(curl);
+    if(res)*res = curl_easy_perform(curl);
     *len = bb.sz;
 
     return bb.response;
 }
 
+uint8_t* mta_request(struct mta_req* mr, enum train line, int* len){
+    char url[100] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
+
+    memcpy(url+65, url_lookup[line], url_lookup_len[line]);
+    return curl_request(mr->curl, url, len, NULL);
+}
+
 // how do i do multiple curl_request calls? need to refresh bb, keep everythign else the same
 // actually, should be able to update train we're using too, so url
 int main(){
-    char url[] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
-    CURL* curl = setup_curl();
+    struct mta_req* mr = setup_mr();
 
     int len;
     CURLcode res;
 
-    for(int i = 0; i < 10; ++i){
-        free(curl_request(curl, url, &len, &res));
-        printf("res: %i, read %i bytes\n", res, len);
-    }
+    /*
+     * for(int i = 0; i < 10; ++i){
+     *     free(curl_request(curl, url, &len, &res));
+     *     printf("res: %i, read %i bytes\n", res, len);
+     * }
+    */
 
-    curl_easy_cleanup(curl);
-    curl_global_cleanup();
+    cleanup_mr(mr);
 }
