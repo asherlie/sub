@@ -38,12 +38,11 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     return size*nmemb;
 }
 
-/*CURL* setup_curl(){*/
 struct mta_req* setup_mr(){
     struct mta_req* mr = malloc(sizeof(struct mta_req));
-    /*curl_global_init(CURL_GLOBAL_ALL);*/
     curl_global_init(CURL_GLOBAL_DEFAULT);
     mr->curl = curl_easy_init();
+    curl_easy_setopt(mr->curl, CURLOPT_WRITEFUNCTION, curl_writefunc);
     return mr;
 }
 
@@ -55,10 +54,8 @@ void cleanup_mr(struct mta_req* mr){
 }
 
 void prep_curl(CURL* curl, char* header, struct buildbuf* bb){
-    /* TODO: this should be freed using curl_slist_free_all(headers); */
     struct curl_slist* headers = NULL;
 
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_writefunc);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)bb);
     headers = curl_slist_append(headers, header);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
@@ -71,9 +68,7 @@ uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
     curl_easy_setopt(curl, CURLOPT_URL, url);
 
     init_buildbuf(&bb, 0);
-    // some of the contents of prep_curl() shouldn't occur more than once
-    //  header
-    //  CURLOPT_WRITEFUNCTION
+    // TODO: header shouldn't be repeatedly updated - it stays the same
     prep_curl(curl, "x-api-key: 3Mna5AMSgo15Cd41NJ61OaeqgzjezcMb4HxCQH5J", &bb);
 
     status = curl_easy_perform(curl);
@@ -87,12 +82,9 @@ uint8_t* mta_request(struct mta_req* mr, enum train line, int* len){
     char url[100] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
 
     memcpy(url+65, url_lookup[line], url_lookup_len[line]);
-    puts(url);
     return curl_request(mr->curl, url, len, NULL);
 }
 
-// how do i do multiple curl_request calls? need to refresh bb, keep everythign else the same
-// actually, should be able to update train we're using too, so url
 int main(){
     struct mta_req* mr = setup_mr();
 
