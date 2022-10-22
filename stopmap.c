@@ -5,15 +5,10 @@
 #include <ctype.h>
 
 #include "stopmap.h"
+
 /*
- * sm should be generated and stored on disk to be quickly
- * loaded back
- * 
  * this doesn't need to be threadsafe - it will only be read from during
  * runtime
- * 
- * it is meant to be created either on startup or read from disk on startup
- * never touched during runtime unless corrupted
 */
 
 void init_stopmap(struct stopmap* sm, int n_buckets){
@@ -125,24 +120,24 @@ void build_stopmap(struct stopmap* sm, FILE* fp_in){
     }
 }
 
- int main(int a, char** b){
-     struct stopmap sm;
-     FILE* fp = a > 1 ? fopen(b[1], "r") : stdin;
+int main(int a, char** b){
+    struct stopmap sm;
+    FILE* fp = a > 1 ? fopen(b[1], "r") : stdin;
 
-     char* ln = NULL, * res;
-     size_t sz;
-     int b_read;
+    char* ln = NULL, * res;
+    size_t sz;
+    int b_read;
 
-     init_stopmap(&sm, 1200);
-     build_stopmap(&sm, fp);
+    init_stopmap(&sm, 1200);
+    build_stopmap(&sm, fp);
 
-     while((b_read = getline(&ln, &sz, stdin)) != -1){
-        ln[b_read-1] = 0;
-        if(res = lookup_stopmap(&sm, ln)){
-            puts(res);
-        }
-     }
+    while((b_read = getline(&ln, &sz, stdin)) != -1){
+       ln[b_read-1] = 0;
+       if(res = lookup_stopmap(&sm, ln)){
+           puts(res);
+       }
+    }
 
-     fclose(fp);
-     free_stopmap(&sm);
- }
+    fclose(fp);
+    free_stopmap(&sm);
+}
