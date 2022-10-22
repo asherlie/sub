@@ -33,6 +33,25 @@ int train_direction(char* stop_id){
     return 0;
 }
 
+#if !1
+could keep a struct populated, or actually a hashmap populated
+indexable by stop and then train
+
+map[times_square][1_train][0] == northbound arrivals
+map[times_square][1_train][1] == southbound arrivals
+
+user sets how often he wants to have this updated
+
+actually this can just be a sample program for live feed
+
+easier too would be command line tool to check next arrivals for a station
+could work with the same struct but it is kind of uneccessary overhead
+
+because i could just go through existing structs until i find a string match
+
+would be good to have an easy struct of results though
+#endif
+
 int main(){
     struct mta_req* mr = setup_mr();
 
@@ -54,7 +73,7 @@ int main(){
     build_stopmap(&sm, fp);
     fclose(fp);
 
-    data = mta_request(mr, NUMBERS, &len, &res);
+    data = mta_request(mr, L, &len, &res);
     cur_time = time(NULL);
 
     feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data);
