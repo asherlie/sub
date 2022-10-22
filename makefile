@@ -21,7 +21,7 @@ gtfs-realtime.pb-c.c: gtfs-realtime.proto
 	protoc-c gtfs-realtime.proto --c_out=.
 
 sub: sub.c gtfs_req.o gtfs-realtime.pb-c.c mta_txt
-	$(CC) $(CFLAGS) sub.c gtfs-realtime.pb-c.c gtfs_req.o
+	$(CC) $(CFLAGS) sub.c gtfs-realtime.pb-c.c gtfs_req.o -o sub
 
 gtfs_req.o: gtfs_req.c
 
