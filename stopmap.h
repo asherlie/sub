@@ -14,6 +14,7 @@ struct stop_lst{
 };
 
 struct stopmap{
+    int n_buckets;
     struct stop** buckets;
 };
 
