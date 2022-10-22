@@ -81,6 +81,6 @@ uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
 uint8_t* mta_request(struct mta_req* mr, enum train line, int* len, CURLcode* res){
     char url[100] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
 
-    memcpy(url+65, url_lookup[line], url_lookup_len[line]);
+    memcpy(url+66, url_lookup[line], url_lookup_len[line]);
     return curl_request(mr->curl, url, len, res);
 }
