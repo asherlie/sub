@@ -78,28 +78,9 @@ uint8_t* curl_request(CURL* curl, char* url, int* len, CURLcode* res){
     return bb.response;
 }
 
-uint8_t* mta_request(struct mta_req* mr, enum train line, int* len){
+uint8_t* mta_request(struct mta_req* mr, enum train line, int* len, CURLcode* res){
     char url[100] = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
 
     memcpy(url+65, url_lookup[line], url_lookup_len[line]);
-    return curl_request(mr->curl, url, len, NULL);
-}
-
-int main(){
-    struct mta_req* mr = setup_mr();
-
-    int len;
-    for(int i = ACE; i <= NUMBERS; ++i){
-        mta_request(mr, i, &len);
-        printf("read %i bytes\n", len);
-    }
-
-    /*
-     * for(int i = 0; i < 10; ++i){
-     *     free(curl_request(curl, url, &len, &res));
-     *     printf("res: %i, read %i bytes\n", res, len);
-     * }
-    */
-
-    cleanup_mr(mr);
+    return curl_request(mr->curl, url, len, res);
 }
