@@ -10,8 +10,6 @@ struct stop{
     struct stop* next;
 };
 
-struct stop_lst{
-};
 
 struct stopmap{
     int n_buckets;
@@ -19,3 +17,4 @@ struct stopmap{
 };
 
 void init_stopmap(struct stopmap* sm, int n_buckets);
+char* lookup_stopmap(struct stopmap* sm, char* stop_id);

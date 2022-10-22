@@ -92,10 +92,40 @@ char* lookup_stopmap(struct stopmap* sm, char* stop_id){
     return s->stop_name;
 }
 
-int main(){
-    struct stopmap sm;
-    init_stopmap(&sm, 1000);
-    insert_stopmap(&sm, "J14N", "104 St");
-    insert_stopmap(&sm, "103N", "238 St");
-    free_stopmap(&sm);
+/*
+ * stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station
+ * 101,,Van Cortlandt Park-242 St,,40.889248,-73.898583,,,1,
+*/
+void build_stopmap(struct stopmap* sm, FILE* fp_in){
+    char cursor;
+    char buf[50];
+    int idx, commas = 0;
+
+    while((cursor = fgetc(fp_in)) != EOF){
+        switch(cursor){
+            case '\n':
+                idx = 0;
+                commas = 0;
+                break;
+            case ',':
+                ++commas;
+                break;
+            default:
+                if(commas < 3)buf[idx++] = c;
+                
+        }
+        if(cursor == '\n'){
+            idx = 0;
+            commas = 0;
+        }
+    }
 }
+
+ int main(int a, char** b){
+     struct stopmap sm;
+     FILE* fp = fopen(b[1], "r");
+     init_stopmap(&sm, 1000);
+     build_stopmap(&sm, fp);
+     fclose(fp);
+     free_stopmap(&sm);
+ }
