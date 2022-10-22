@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sub.h"
+
 #include "stopmap.h"
 #include "gtfs_req.h"
 #include "gtfs-realtime.pb-c.h"
@@ -50,6 +52,11 @@ could work with the same struct but it is kind of uneccessary overhead
 because i could just go through existing structs until i find a string match
 
 would be good to have an easy struct of results though
+
+it must also be possible to print upcoming arrivals at a given station
+n_soonest_arrvals(map[times_square], 5, NORTH)
+should print the 5 northbounds trains coming the soonest to times square
+
 #endif
 
 int main(){
