@@ -120,6 +120,7 @@ void build_stopmap(struct stopmap* sm, FILE* fp_in){
     }
 }
 
+#if 0
 int main(int a, char** b){
     struct stopmap sm;
     FILE* fp = a > 1 ? fopen(b[1], "r") : stdin;
@@ -141,3 +142,4 @@ int main(int a, char** b){
     fclose(fp);
     free_stopmap(&sm);
 }
+#endif

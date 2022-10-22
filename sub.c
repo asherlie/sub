@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "stopmap.h"
 #include "gtfs_req.h"
 #include "gtfs-realtime.pb-c.h"
 
@@ -24,6 +25,10 @@ int main(){
  *     transit_realtime__vehicle_position_un
 */
     struct mta_req* mr = setup_mr();
+
+    struct stopmap sm;
+    FILE* fp;
+
     uint8_t* data;
     int len;
     CURLcode res;
@@ -33,7 +38,13 @@ int main(){
 
     (void)url_lookup;
 
-    data = mta_request(mr, NUMBERS, &len, &res);
+    fp = fopen("mta_txt/stops.txt", "r");
+    init_stopmap(&sm, 1200);
+    build_stopmap(&sm, fp);
+    fclose(fp);
+
+    data = mta_request(mr, BDFM, &len, &res);
+    puts((char*)data);
     printf("read %i bytes, result: %i\n", len, res);
 
     feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data);
@@ -47,11 +58,18 @@ int main(){
     if(feedmsg){
         for(size_t i = 0; i < feedmsg->n_entity; ++i){
             /*printf("vehicle label: %s\n", feedmsg->entity[i]->vehicle->vehicle->label);*/
-            for(size_t j = 0; j < feedmsg->entity[i]->trip_update->n_stop_time_update; ++j){
-                struct TransitRealtime__TripUpdate__StopTimeUpdate* stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
+            TransitRealtime__FeedEntity* e = feedmsg->entity[i];
+            if(e->vehicle)printf("train: %s\n", feedmsg->entity[i]->vehicle->trip->route_id);
+            if(!e->trip_update)continue;
+            for(size_t j = 0; j < e->trip_update->n_stop_time_update; ++j){
+                struct TransitRealtime__TripUpdate__StopTimeUpdate* stu;
+                time_t t;
+                /*if(!feedmsg->entity[i]->trip_update)continue;*/
+                 stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
 /*printf("label: %s\n", feedmsg->entity[i]->trip_update->stop_time_update[j]->*/
-                time_t t = stu->arrival->time;
-                printf("arriving to stop_id: %s at: %s\n", stu->stop_id, ctime(&t));
+                if(!stu->arrival)continue;
+                t = stu->arrival->time;
+                printf("arriving to stop: %s at: %s\n", lookup_stopmap(&sm, stu->stop_id), ctime(&t));
             }
         }
     }
