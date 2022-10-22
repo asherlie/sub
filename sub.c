@@ -1,53 +1,21 @@
 #include <stdio.h>
+#include <stdlib.h>
 
+#include "gtfs_req.h"
 #include "gtfs-realtime.pb-c.h"
-#if !1
 
-// carriage_* refers to car numbers
-/* TransitRealtime__VehiclePosition methods */
-void   transit_realtime__vehicle_position__init
-                     (TransitRealtime__VehiclePosition         *message);
+void* pb_malloc(void* alloc_data, size_t size){
+    (void)alloc_data;
+    /*printf("allocing %li bytes, passed: %p\n", size, alloc_data);*/
+    return malloc(size);
+}
 
-size_t transit_realtime__vehicle_position__get_packed_size
-                     (const TransitRealtime__VehiclePosition   *message);
-size_t transit_realtime__vehicle_position__pack
-                     (const TransitRealtime__VehiclePosition   *message,
-                      uint8_t             *out);
-size_t transit_realtime__vehicle_position__pack_to_buffer
-                     (const TransitRealtime__VehiclePosition   *message,
-                      ProtobufCBuffer     *buffer);
-TransitRealtime__VehiclePosition *
-       transit_realtime__vehicle_position__unpack
-                     (ProtobufCAllocator  *allocator,
-                      size_t               len,
-                      const uint8_t       *data);
+void pb_free(void* alloc_data, void* ptr){
+    (void)alloc_data;
+    /*printf("freeing %p, passed: %p\n", ptr, alloc_data);*/
+    free(ptr);
+}
 
-void   transit_realtime__vehicle_position__free_unpacked
-                     (TransitRealtime__VehiclePosition *message,
-                      ProtobufCAllocator *allocator);
-/* TransitRealtime__Alert methods */
-
-void   transit_realtime__trip_update__init
-                     (TransitRealtime__TripUpdate         *message);
-size_t transit_realtime__trip_update__get_packed_size
-                     (const TransitRealtime__TripUpdate   *message);
-size_t transit_realtime__trip_update__pack
-                     (const TransitRealtime__TripUpdate   *message,
-                      uint8_t             *out);
-size_t transit_realtime__trip_update__pack_to_buffer
-                     (const TransitRealtime__TripUpdate   *message,
-                      ProtobufCBuffer     *buffer);
-TransitRealtime__TripUpdate *
-       transit_realtime__trip_update__unpack
-                     (ProtobufCAllocator  *allocator,
-                      size_t               len,
-                      const uint8_t       *data);
-void   transit_realtime__trip_update__free_unpacked
-                     (TransitRealtime__TripUpdate *message,
-                      ProtobufCAllocator *allocator);
-
-
-#endif
 int main(){
 /*
  *     struct TransitRealtime__VehiclePosition vpos;
@@ -55,16 +23,36 @@ int main(){
  *     transit_realtime__vehicle_position__init(&vpos);
  *     transit_realtime__vehicle_position_un
 */
-    TransitRealtime__TripUpdate tu; // - hmm, this contains stu
-    TransitRealtime__TripUpdate__StopTimeUpdate stu;
+    struct mta_req* mr = setup_mr();
+    uint8_t* data;
+    int len;
+    CURLcode res;
+    ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
-    transit_realtime__trip_update__init(&tu);
-    /*
-     * okay, i should be using struct  TransitRealtime__TripUpdate__StopTimeUpdate - i pass it a stop_id and somehow set a GTFS feed
-     * maybe using TransitRealtime__FeedMessage
-    */
-    transit_realtime__trip_update__stop_time_update__init(&stu);
-    stu.stop_id = "613N";
-    printf("%s\n", stu.stop_id);
-    // ayyy, i think i just have to grab the bytes from an http request and unpack them using *_unpack(), which will populate a struct!
+    TransitRealtime__FeedMessage* feedmsg;
+
+    (void)url_lookup;
+
+    data = mta_request(mr, NUMBERS, &len, &res);
+    printf("read %i bytes, result: %i\n", len, res);
+
+    feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data);
+    #if !1
+    feedmsg->n_entity;
+    feedmsg->entity->trip_update[0];
+    feedmsg->entity->trip_update[0]->n_stop_time_update;
+    feedmsg->entity->trip_update[0]->stop_time_update[0]->departure->time;
+    feedmsg->entity->trip_update[0]->trip->base;
+    #endif
+    if(feedmsg){
+        for(size_t i = 0; i < feedmsg->n_entity; ++i){
+            /*printf("vehicle label: %s\n", feedmsg->entity[i]->vehicle->vehicle->label);*/
+            for(size_t j = 0; j < feedmsg->entity[i]->trip_update->n_stop_time_update; ++j){
+                struct TransitRealtime__TripUpdate__StopTimeUpdate* stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
+/*printf("label: %s\n", feedmsg->entity[i]->trip_update->stop_time_update[j]->*/
+                time_t t = stu->arrival->time;
+                printf("arriving to stop_id: %s at: %s\n", stu->stop_id, ctime(&t));
+            }
+        }
+    }
 }
