@@ -5,14 +5,16 @@
 #include <ctype.h>
 
 #include "stopmap.h"
-// sm should be generated and stored on disk to be quickly
-// loaded back
-//
-// this doesn't need to be threadsafe - it will only be read from during
-// runtime
-//
-// it is meant to be created either on startup or read from disk on startup
-// never touched during runtime unless corrupted
+/*
+ * sm should be generated and stored on disk to be quickly
+ * loaded back
+ * 
+ * this doesn't need to be threadsafe - it will only be read from during
+ * runtime
+ * 
+ * it is meant to be created either on startup or read from disk on startup
+ * never touched during runtime unless corrupted
+*/
 
 void init_stopmap(struct stopmap* sm, int n_buckets){
     sm->n_buckets = n_buckets;
@@ -29,16 +31,14 @@ void free_stopmap(struct stopmap* sm){
 }
 
 int stop_id_hash(char* stop_id, int n_buckets){
-    char* idx_s = stop_id + isalpha(*stop_id);
+    char* idx_s = stop_id + (_Bool)isalpha(*stop_id);
     char c;
     int idx = 0;
     for(int i = 0; idx_s[i]; ++i){
         c = idx_s[i];
         if(idx_s[i] == 'N')c = '0';
         if(idx_s[i] == 'S')c = '1';
-        idx += (c-'0')*pow(10, i);
-        /*idx += (idx_s[i] == 'N' || *idx_s == 'S') ? :*/
-        /*ascii*/
+        idx += i ? (c-'0')*pow(10, i) : 1;
     }
     return idx%n_buckets;
 }
@@ -61,7 +61,6 @@ struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool cr
     ret->next = NULL;
     ret->stop_id = stop_id;
     ret->stop_name = NULL;
-    /*printf("ret: %p, prev: %p\n", ret, prev);*/
     /* no match was found, if(prev), we found a matching
      * bucket and can insert after the last element
      *
@@ -89,6 +88,7 @@ char* lookup_stopmap(struct stopmap* sm, char* stop_id){
     _Bool found;
     struct stop* s = lookup_stopmap_internal(sm, stop_id, 0, &found);
 
+    if(!s)return NULL;
     return s->stop_name;
 }
 
@@ -98,7 +98,6 @@ char* lookup_stopmap(struct stopmap* sm, char* stop_id){
 */
 void build_stopmap(struct stopmap* sm, FILE* fp_in){
     char cursor;
-    /*char buf[50];*/
     char stop_id[20];
     char stop_name[50];
     int idx = 0, commas = 0;
@@ -110,8 +109,7 @@ void build_stopmap(struct stopmap* sm, FILE* fp_in){
                 idx = 0;
                 commas = 0;
                 if(n_lines++ > 0){
-                    /*printf("insert(%s, %s)\n", stop_id, stop_name);*/
-                    insert_stopmap(sm, stop_id, stop_name);
+                    insert_stopmap(sm, strdup(stop_id), strdup(stop_name));
                 }
                 memset(stop_id, 0, sizeof(stop_id));
                 memset(stop_name, 0, sizeof(stop_name));
@@ -123,17 +121,28 @@ void build_stopmap(struct stopmap* sm, FILE* fp_in){
             default:
                 if(!commas)stop_id[idx++] = cursor;
                 if(commas == 2)stop_name[idx++] = cursor;
-                /*if(commas < 3)buf[idx++] = cursor;*/
-                
         }
     }
 }
 
  int main(int a, char** b){
      struct stopmap sm;
-     FILE* fp = fopen(b[1], "r");
+     FILE* fp = a > 1 ? fopen(b[1], "r") : stdin;
+
+     char* ln = NULL, * res;
+     size_t sz;
+     int b_read;
+
      init_stopmap(&sm, 1200);
      build_stopmap(&sm, fp);
+
+     while((b_read = getline(&ln, &sz, stdin)) != -1){
+        ln[b_read-1] = 0;
+        if(res = lookup_stopmap(&sm, ln)){
+            puts(res);
+        }
+     }
+
      fclose(fp);
      free_stopmap(&sm);
  }
