@@ -28,7 +28,7 @@ void free_stopmap(struct stopmap* sm){
     free(sm->buckets);
 }
 
-int stop_id_hash(char* stop_id){
+int stop_id_hash(char* stop_id, int n_buckets){
     char* idx_s = stop_id + isalpha(*stop_id);
     char c;
     int idx = 0;
@@ -40,12 +40,12 @@ int stop_id_hash(char* stop_id){
         /*idx += (idx_s[i] == 'N' || *idx_s == 'S') ? :*/
         /*ascii*/
     }
-    return idx;
+    return idx%n_buckets;
 }
 
 struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool create_missing, _Bool* found){
     /*int idx = atoi(stop_idx);*/
-    int idx = stop_id_hash(stop_id);
+    int idx = stop_id_hash(stop_id, sm->n_buckets);
     struct stop* ret = sm->buckets[idx], * prev = NULL;
 
     for(; ret; ret = ret->next){
@@ -59,7 +59,7 @@ struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool cr
     if(!create_missing)return NULL;
     ret = malloc(sizeof(struct stop));
     ret->next = NULL;
-    ret->stop_id = strdup(stop_id);
+    ret->stop_id = stop_id;
     ret->stop_name = NULL;
     /*printf("ret: %p, prev: %p\n", ret, prev);*/
     /* no match was found, if(prev), we found a matching
@@ -81,7 +81,7 @@ void insert_stopmap(struct stopmap* sm, char* stop_id, char* stop_name){
     struct stop* s = lookup_stopmap_internal(sm, stop_id, 1, &found);
 
     if(!found){
-        s->stop_name = strdup(stop_name);
+        s->stop_name = stop_name;
     }
 }
 
@@ -98,25 +98,33 @@ char* lookup_stopmap(struct stopmap* sm, char* stop_id){
 */
 void build_stopmap(struct stopmap* sm, FILE* fp_in){
     char cursor;
-    char buf[50];
-    int idx, commas = 0;
+    /*char buf[50];*/
+    char stop_id[20];
+    char stop_name[50];
+    int idx = 0, commas = 0;
+    int n_lines = 0;
 
     while((cursor = fgetc(fp_in)) != EOF){
         switch(cursor){
             case '\n':
                 idx = 0;
                 commas = 0;
+                if(n_lines++ > 0){
+                    /*printf("insert(%s, %s)\n", stop_id, stop_name);*/
+                    insert_stopmap(sm, stop_id, stop_name);
+                }
+                memset(stop_id, 0, sizeof(stop_id));
+                memset(stop_name, 0, sizeof(stop_name));
                 break;
             case ',':
                 ++commas;
+                idx = 0;
                 break;
             default:
-                if(commas < 3)buf[idx++] = c;
+                if(!commas)stop_id[idx++] = cursor;
+                if(commas == 2)stop_name[idx++] = cursor;
+                /*if(commas < 3)buf[idx++] = cursor;*/
                 
-        }
-        if(cursor == '\n'){
-            idx = 0;
-            commas = 0;
         }
     }
 }
@@ -124,7 +132,7 @@ void build_stopmap(struct stopmap* sm, FILE* fp_in){
  int main(int a, char** b){
      struct stopmap sm;
      FILE* fp = fopen(b[1], "r");
-     init_stopmap(&sm, 1000);
+     init_stopmap(&sm, 1200);
      build_stopmap(&sm, fp);
      fclose(fp);
      free_stopmap(&sm);
