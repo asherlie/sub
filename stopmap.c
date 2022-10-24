@@ -4,6 +4,7 @@
 #include <math.h>
 #include <ctype.h>
 
+#include "dir.h"
 #include "stopmap.h"
 
 /*
@@ -25,14 +26,21 @@ void free_stopmap(struct stopmap* sm){
     free(sm->buckets);
 }
 
-int stop_id_hash(char* stop_id, int n_buckets){
+int stop_id_hash(char* stop_id, int n_buckets, enum direction* dir){
     char* idx_s = stop_id + (_Bool)isalpha(*stop_id);
     char c;
     int idx = 0;
     for(int i = 0; idx_s[i]; ++i){
         c = idx_s[i];
-        if(idx_s[i] == 'N')c = '0';
-        if(idx_s[i] == 'S')c = '1';
+        if(idx_s[i] == 'N'){
+            c = '0';
+            if(dir)*dir = NORTH;
+        }
+        else if(idx_s[i] == 'S'){
+            c = '1';
+            if(dir)*dir = SOUTH;
+        }
+        else if(dir)*dir = NONE;
         idx += i ? (c-'0')*pow(10, i) : 1;
     }
     return idx%n_buckets;
@@ -40,7 +48,8 @@ int stop_id_hash(char* stop_id, int n_buckets){
 
 struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool create_missing, _Bool* found){
     /*int idx = atoi(stop_idx);*/
-    int idx = stop_id_hash(stop_id, sm->n_buckets);
+    enum direction dir;
+    int idx = stop_id_hash(stop_id, sm->n_buckets, &dir);
     struct stop* ret = sm->buckets[idx], * prev = NULL;
 
     for(; ret; ret = ret->next){
@@ -55,6 +64,7 @@ struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool cr
     ret = malloc(sizeof(struct stop));
     ret->next = NULL;
     ret->stop_id = stop_id;
+    ret->dir = dir;
     ret->stop_name = NULL;
     /* no match was found, if(prev), we found a matching
      * bucket and can insert after the last element
@@ -79,11 +89,12 @@ void insert_stopmap(struct stopmap* sm, char* stop_id, char* stop_name){
     }
 }
 
-char* lookup_stopmap(struct stopmap* sm, char* stop_id){
+char* lookup_stopmap(struct stopmap* sm, char* stop_id, enum direction* dir){
     _Bool found;
     struct stop* s = lookup_stopmap_internal(sm, stop_id, 0, &found);
 
     if(!s)return NULL;
+    if(dir)*dir = s->dir;
     return s->stop_name;
 }
 
