@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "sub.h"
+#include "dir.h"
 
 #include "stopmap.h"
 #include "gtfs_req.h"
@@ -25,14 +26,14 @@ void pb_free(void* alloc_data, void* ptr){
  * northbound: 1
  * southbound: 2
  */
-int train_direction(char* stop_id){
+enum direction train_direction(char* stop_id){
     switch(stop_id[strlen(stop_id)-1]){
         case 'N':
-            return 1;
+            return NORTH;
         case 'S':
-            return 2;
+            return SOUTH;
     }
-    return 0;
+    return NONE;
 }
 
 #if !1
@@ -59,7 +60,148 @@ should print the 5 northbounds trains coming the soonest to times square
 
 #endif
 
-int main(){
+int arrival_time_hash(){
+    /*int idx = stop_id_hash(stop_id, n_buckets);*/
+    return 0;
+}
+
+void init_train_arrivals(struct train_arrivals* ta, int n_buckets){
+    ta->n_buckets = n_buckets;
+    ta->train_stop_buckets = calloc(n_buckets, sizeof(struct train_stop*));
+}
+
+struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* stop_id, _Bool create_missing){
+    int stop_idx = stop_id_hash(stop_id, ta->n_buckets, NULL);
+    struct train_stop* ts = ta->train_stop_buckets[stop_idx], * prev = NULL;
+    for(; ts; ts = ts->next){
+        if(!strcmp(ts->stop_id, stop_id))return ts;
+        prev = ts;
+    }
+    if(!create_missing)return NULL;
+    /* ts == NULL at this point */
+    ts = malloc(sizeof(struct train_stop));
+    ts->next = NULL;
+    ts->arrivals = NULL;
+    ts->stop_id = strdup(stop_id);
+    if(!prev){
+        ta->train_stop_buckets[stop_idx] = ts;
+    }
+    else{
+        prev->next = ts;
+    }
+    return ts;
+}
+
+/* arrival lists should possibly be separated based on direction
+ * we also need to be able to efficiently update existing arrivals
+ * if we can binary search to find 
+ */
+// returns n updated arrival times
+// TODO: without a unique identifier for each stop, which i believe does exist but that we don't have access to service_id
+// nvm we do actually - it's in struct  TransitRealtime__TripUpdate__TripProperties.trip_id
+// TODO: use this is time_t scheduled_arrival doesn't work
+// even though it's a string it can be converted to an int reliably
+// because this is only relevant for this applicatin once we know the station and train already - we just need 
+// an identifier to know which scheduled arrival this is for updating
+// we can probably use just the number at the end of trip_id
+struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* stop_id, /*time_t scheduled_arrival,*/ char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
+    struct train_stop* ts = lookup_train_stop_internal(ta, stop_id, 1);
+    /*int updates = 0;*/
+    /* is there a unique identifier i can compare? need to commpare specific arrivals to make sure they're the same
+     * in case we're updating an existing one
+            i can use stoptimeupdate.optional uint32 stop_sequence = 1;
+     */
+    /* TODO: optionally just insert into the back - i'll need a pointer to last 
+     * this can be done if we know we're not updating and doing an initial insertion
+     */
+    _Bool prepend = 0;
+    struct train_arrival* arr, * tmp_arr, * prev_arr = NULL;
+    if(!ts->arrivals || time >= ts->arrivals->arrival){
+        for(arr = ts->arrivals; arr; arr = arr->next){
+            if(arr->arrival+arr->delay == time+delay && arr->dir == dir){
+            /*
+             * we need to insert in prev once we've found our ins point
+             * we can break once we've reached > time
+            */
+            /*if(arr->stop_sequence_id == stop_sequence_id){*/
+                // TODO: do this atomically
+                arr->arrival = time;
+                arr->departure = departure;
+                arr->delay = delay;
+                /*puts("updated existing");*/
+                return arr;
+            }
+            /* we know to insert between prev and arr */
+            if(arr->arrival > time)break;
+            prev_arr = arr;
+        }
+    }
+    /* if this should be idx 0 */
+    else prepend = 1;
+    tmp_arr = malloc(sizeof(struct train_arrival));
+    tmp_arr->dir = dir;
+    tmp_arr->train = train;
+    /*arr->stop_sequence_id = stop_sequence_id;*/
+    tmp_arr->arrival = time;
+    tmp_arr->departure = departure;
+    tmp_arr->delay = delay;
+    tmp_arr->next = NULL;
+
+    // TODO: link in new arrival atomically
+    if(prepend){
+        prev_arr = ts->arrivals;
+        tmp_arr->next = prev_arr;
+        ts->arrivals = tmp_arr;
+        return tmp_arr;
+    }
+    if(!prev_arr){
+        ts->arrivals = tmp_arr;
+    }
+    else{
+        // 
+        prev_arr->next = tmp_arr;
+        tmp_arr->next = arr;
+    }
+    return tmp_arr;
+}
+
+struct train_stop* lookup_train_stop(struct train_arrivals* ta, char* stop_name, char* stop_id){
+     char* stop_id_final = stop_id;
+ 
+     // TODO: we should look up stop_id
+     if(!stop_id_final){
+        stop_id_final = stop_name;
+     }
+     return lookup_train_stop_internal(ta, stop_id_final, 0);
+}
+
+// TODO: should the indexing function ignore N/S? that way we can look at all arrivals in one place
+// train_names should be replaced with a map - an array of size n_ascii that is set to indicate which train lines to query
+// map['c'] = 1, map['2'] = 1 will be c train and 2 train
+// TODO: depending on which are triggered, we can selectively populate our struct
+struct train_arrival** lookup_upcoming_arrivals(struct train_stop* ts, _Bool* train_lines, time_t cur_time, enum direction dir, int n_arrivals){
+    struct train_arrival** arrivals = calloc(sizeof(struct train_arrival), n_arrivals);
+    int idx = 0;
+    for(struct train_arrival* ta = ts->arrivals; ta; ta = ta->next){
+        /* TODO: dir is redundant, same info is captured in stop name - 101N, for ex. */
+        // TODO URGENT: we should check if train has departed, not arrived. we can then print trains that are currently at station as well
+        if(ta->arrival > cur_time && (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train]))arrivals[idx++] = ta;
+    }
+    return arrivals;
+}
+
+void conv_time(time_t arrival, int* mins, int* secs){
+    *mins = arrival/60;
+    *secs = arrival-(*mins*60);
+}
+ 
+/* TODO: combine all train lines in one struct train_arrivals
+ * TODO: move all code to a separate file
+ *          once code is separated i'll be able to easily add diff lines to the same struct
+ * TODO: add example to continuously update arrival of a given train or trains at stations
+ * <> n_upcoming stop_id train_name
+ */
+int main(int a, char** b){
     struct mta_req* mr = setup_mr();
 
     struct stopmap sm;
@@ -71,7 +213,14 @@ int main(){
     CURLcode res;
     ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
+    enum direction dir;
+
+    struct train_arrivals ta;
+    int n_upcoming;
+
     TransitRealtime__FeedMessage* feedmsg;
+
+    if(a < 3)return 0;
 
     (void)url_lookup;
 
@@ -80,7 +229,9 @@ int main(){
     build_stopmap(&sm, fp);
     fclose(fp);
 
-    data = mta_request(mr, L, &len, &res);
+    init_train_arrivals(&ta, 1200);
+
+    data = mta_request(mr, NUMBERS, &len, &res);
     cur_time = time(NULL);
 
     feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data);
@@ -97,19 +248,55 @@ int main(){
             for(size_t j = 0; j < e->trip_update->n_stop_time_update; ++j){
                 struct TransitRealtime__TripUpdate__StopTimeUpdate* stu;
                 time_t t;
+
                 /*if(!feedmsg->entity[i]->trip_update)continue;*/
                  stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
 /*printf("label: %s\n", feedmsg->entity[i]->trip_update->stop_time_update[j]->*/
                 if(!stu->arrival)continue;
+
+                if(!stu->departure){
+                    // set departure if possible - if not, don't print stops in the past
+                    continue;
+                }
                 t = stu->arrival->time;
+                /* why would train_name == NULL? */
+                insert_arrival_time(&ta, stu->stop_id, train_name ? strdup(train_name) : "no train name", train_direction(stu->stop_id), t, stu->departure->time, stu->arrival->delay);
                  /*
                   * printf("%s train arriving to stop: %s at: %s\n", train_name, lookup_stopmap(&sm, stu->stop_id), ctime(&t));
                   * printf("%s train arriving to stop: %s at: %li\n", train_name, lookup_stopmap(&sm, stu->stop_id), t-cur_time);
                  */
-                 printf("%sbound %s train arriving at stop: %s in: %li seconds\n",
+                 if(0)printf("%sbound %s train arriving at stop: %s in: %li seconds\n",
                        (train_direction(stu->stop_id) == 1) ? "north" : "south",
-                       train_name, lookup_stopmap(&sm, stu->stop_id), t-cur_time);
+                       train_name, lookup_stopmap(&sm, stu->stop_id, NULL), t-cur_time);
+            }
+        }
+        struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
+        struct train_arrival** arrivals;
+        char* stop_name = lookup_stopmap(&sm, b[2], &dir);
+        _Bool train_lines[200] = {0};
+        int mins, secs;
+
+        for(int i = 3; i < a; ++i){
+            train_lines[(int)*b[i]] = 1;
+        }
+
+        if(!stop_name)stop_name = b[2];
+        
+        n_upcoming = atoi(b[1]);
+
+        cur_time = time(NULL);
+        printf("%i %s-bound upcoming arrivals to \"%s\":\n", n_upcoming, dirtostr(dir), stop_name);
+        if(ts){
+            arrivals = lookup_upcoming_arrivals(ts, a > 3 ? train_lines : NULL, cur_time, NONE, n_upcoming);
+            for(int i = 0; i < n_upcoming; ++i){
+                if(!arrivals[i])break;
+                conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
+                printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);
             }
         }
     }
 }
+/*
+ * shouldn't be hard to keep arrivals list sorted!!! if time < first index, save some time and insert there!
+ * we don't have to check this way for duplicates too!
+*/
