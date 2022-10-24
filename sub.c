@@ -104,7 +104,7 @@ struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* s
 // because this is only relevant for this applicatin once we know the station and train already - we just need 
 // an identifier to know which scheduled arrival this is for updating
 // we can probably use just the number at the end of trip_id
-struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* stop_id, /*time_t scheduled_arrival,*/ char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
+struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* stop_id, char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
     struct train_stop* ts = lookup_train_stop_internal(ta, stop_id, 1);
     /*int updates = 0;*/
     /* is there a unique identifier i can compare? need to commpare specific arrivals to make sure they're the same
@@ -174,18 +174,28 @@ struct train_stop* lookup_train_stop(struct train_arrivals* ta, char* stop_name,
      }
      return lookup_train_stop_internal(ta, stop_id_final, 0);
 }
-
+/*should print 'arrived _ minutes ago, departing in _' if in past*/
 // TODO: should the indexing function ignore N/S? that way we can look at all arrivals in one place
 // train_names should be replaced with a map - an array of size n_ascii that is set to indicate which train lines to query
 // map['c'] = 1, map['2'] = 1 will be c train and 2 train
 // TODO: depending on which are triggered, we can selectively populate our struct
 struct train_arrival** lookup_upcoming_arrivals(struct train_stop* ts, _Bool* train_lines, time_t cur_time, enum direction dir, int n_arrivals){
     struct train_arrival** arrivals = calloc(sizeof(struct train_arrival), n_arrivals);
+    int secs_before_departure = 0;
     int idx = 0;
     for(struct train_arrival* ta = ts->arrivals; ta; ta = ta->next){
         /* TODO: dir is redundant, same info is captured in stop name - 101N, for ex. */
         // TODO URGENT: we should check if train has departed, not arrived. we can then print trains that are currently at station as well
-        if(ta->arrival > cur_time && (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train]))arrivals[idx++] = ta;
+        /*if(ta->arrival > cur_time-secs_before_departure && (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train]))arrivals[idx++] = ta;*/
+        /* append already-arrived trains if they haven't yet departed */
+        /*arrival > now - (seconds in the past)*/
+        /*if(ta->arrival > ((ta->departure) ? ta->departure : cur_time-secs_before_departure) && */
+        if((ta->departure ? ta->departure : ta->arrival+secs_before_departure) > cur_time &&
+        /*if(ta->arrival > cur_time-secs_before_departure && */
+           (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train])){
+               /*printf("departure: %li\n", ta->departure);*/
+               arrivals[idx++] = ta;
+           }
     }
     return arrivals;
 }
@@ -254,13 +264,11 @@ int main(int a, char** b){
 /*printf("label: %s\n", feedmsg->entity[i]->trip_update->stop_time_update[j]->*/
                 if(!stu->arrival)continue;
 
-                if(!stu->departure){
-                    // set departure if possible - if not, don't print stops in the past
-                    continue;
-                }
                 t = stu->arrival->time;
                 /* why would train_name == NULL? */
-                insert_arrival_time(&ta, stu->stop_id, train_name ? strdup(train_name) : "no train name", train_direction(stu->stop_id), t, stu->departure->time, stu->arrival->delay);
+                // set departure if possible - if not, don't print stops in the past
+                insert_arrival_time(&ta, stu->stop_id, train_name ? strdup(train_name) : "no train name",
+                                    train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
                  /*
                   * printf("%s train arriving to stop: %s at: %s\n", train_name, lookup_stopmap(&sm, stu->stop_id), ctime(&t));
                   * printf("%s train arriving to stop: %s at: %li\n", train_name, lookup_stopmap(&sm, stu->stop_id), t-cur_time);
@@ -273,7 +281,7 @@ int main(int a, char** b){
         struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
         struct train_arrival** arrivals;
         char* stop_name = lookup_stopmap(&sm, b[2], &dir);
-        _Bool train_lines[200] = {0};
+        _Bool train_lines[200] = {0}, negative;
         int mins, secs;
 
         for(int i = 3; i < a; ++i){
@@ -291,7 +299,12 @@ int main(int a, char** b){
             for(int i = 0; i < n_upcoming; ++i){
                 if(!arrivals[i])break;
                 conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
-                printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);
+                negative = mins < 0 || secs < 0;
+                /*printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);*/
+                printf("  %.2i: %s train arrive%s %.2i:%.2i%s", i+1, arrivals[i]->train, negative ? "d" : "s in", abs(mins), abs(secs), negative ? " ago" : "");
+                conv_time(arrivals[i]->departure-cur_time, &mins, &secs);
+                if(negative)printf(" and departs in %.2i:%.2i", mins, secs);
+                puts("");
             }
         }
     }
