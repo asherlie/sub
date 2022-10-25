@@ -48,7 +48,7 @@ int stop_id_hash(char* stop_id, int n_buckets, enum direction* dir){
 
 struct stop* lookup_stopmap_internal(struct stopmap* sm, char* stop_id, _Bool create_missing, _Bool* found){
     /*int idx = atoi(stop_idx);*/
-    enum direction dir;
+    enum direction dir = NONE;
     int idx = stop_id_hash(stop_id, sm->n_buckets, &dir);
     struct stop* ret = sm->buckets[idx], * prev = NULL;
 

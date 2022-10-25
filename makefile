@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= -Wall -Wextra -Wpedantic -Werror -g3 -lprotobuf-c -lcurl -lm
+CFLAGS= -Wall -Wextra -Wpedantic -Werror -O3 -lprotobuf-c -lcurl -lm
 gtzip="http://web.mta.info/developers/data/nyct/subway/google_transit.zip"
 
 all: sub
