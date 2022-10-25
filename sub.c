@@ -11,21 +11,14 @@
 
 void* pb_malloc(void* alloc_data, size_t size){
     (void)alloc_data;
-    /*printf("allocing %li bytes, passed: %p\n", size, alloc_data);*/
     return malloc(size);
 }
 
 void pb_free(void* alloc_data, void* ptr){
     (void)alloc_data;
-    /*printf("freeing %p, passed: %p\n", ptr, alloc_data);*/
     free(ptr);
 }
 
-/*
- * unmarked: 0
- * northbound: 1
- * southbound: 2
- */
 enum direction train_direction(char* stop_id){
     switch(stop_id[strlen(stop_id)-1]){
         case 'N':
@@ -34,35 +27,6 @@ enum direction train_direction(char* stop_id){
             return SOUTH;
     }
     return NONE;
-}
-
-#if !1
-could keep a struct populated, or actually a hashmap populated
-indexable by stop and then train
-
-map[times_square][1_train][0] == northbound arrivals
-map[times_square][1_train][1] == southbound arrivals
-
-user sets how often he wants to have this updated
-
-actually this can just be a sample program for live feed
-
-easier too would be command line tool to check next arrivals for a station
-could work with the same struct but it is kind of uneccessary overhead
-
-because i could just go through existing structs until i find a string match
-
-would be good to have an easy struct of results though
-
-it must also be possible to print upcoming arrivals at a given station
-n_soonest_arrvals(map[times_square], 5, NORTH)
-should print the 5 northbounds trains coming the soonest to times square
-
-#endif
-
-int arrival_time_hash(){
-    /*int idx = stop_id_hash(stop_id, n_buckets);*/
-    return 0;
 }
 
 void init_train_arrivals(struct train_arrivals* ta, int n_buckets){
@@ -204,6 +168,32 @@ void conv_time(time_t arrival, int* mins, int* secs){
     *mins = arrival/60;
     *secs = arrival-(*mins*60);
 }
+
+void feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta){
+    char* train_name = NULL;
+    for(size_t i = 0; i < feedmsg->n_entity; ++i){
+        TransitRealtime__FeedEntity* e = feedmsg->entity[i];
+        if(e->vehicle)train_name = e->vehicle->trip->route_id;
+        if(!e->trip_update)continue;
+        for(size_t j = 0; j < e->trip_update->n_stop_time_update; ++j){
+            struct TransitRealtime__TripUpdate__StopTimeUpdate* stu;
+            time_t t;
+
+            stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
+            if(!stu->arrival)continue;
+
+            t = stu->arrival->time;
+            /* why would train_name == NULL? */
+            insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "no train name",
+                                train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
+        }
+    }
+}
+
+/*
+ * void populate_train_arrivals(struct train_arrivals* ta, enum train train_line){
+ * }
+*/
  
 /* TODO: combine all train lines in one struct train_arrivals
  * TODO: move all code to a separate file
@@ -230,7 +220,7 @@ int main(int a, char** b){
 
     TransitRealtime__FeedMessage* feedmsg;
 
-    if(a < 3)return 0;
+    if(a < 3)return 1;
 
     (void)url_lookup;
 
@@ -244,72 +234,39 @@ int main(int a, char** b){
     data = mta_request(mr, NUMBERS, &len, &res);
     cur_time = time(NULL);
 
-    feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data);
+    if(!(feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data)))return 1;
     /*
      * we can print N upcoming trains based on responses, they're sorted by arrival time
     */
-    char* train_name = NULL;
-    if(feedmsg){
-        for(size_t i = 0; i < feedmsg->n_entity; ++i){
-            /*printf("vehicle label: %s\n", feedmsg->entity[i]->vehicle->vehicle->label);*/
-            TransitRealtime__FeedEntity* e = feedmsg->entity[i];
-            if(e->vehicle)train_name = e->vehicle->trip->route_id;
-            if(!e->trip_update)continue;
-            for(size_t j = 0; j < e->trip_update->n_stop_time_update; ++j){
-                struct TransitRealtime__TripUpdate__StopTimeUpdate* stu;
-                time_t t;
+    feedmsg_to_train_arrivals(feedmsg, &ta);
+    struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
+    struct train_arrival** arrivals;
+    char* stop_name = lookup_stopmap(&sm, b[2], &dir);
+    _Bool train_lines[200] = {0}, negative;
+    int mins, secs;
 
-                /*if(!feedmsg->entity[i]->trip_update)continue;*/
-                 stu = feedmsg->entity[i]->trip_update->stop_time_update[j];
-/*printf("label: %s\n", feedmsg->entity[i]->trip_update->stop_time_update[j]->*/
-                if(!stu->arrival)continue;
+    for(int i = 3; i < a; ++i){
+        train_lines[(int)*b[i]] = 1;
+    }
 
-                t = stu->arrival->time;
-                /* why would train_name == NULL? */
-                // set departure if possible - if not, don't print stops in the past
-                insert_arrival_time(&ta, stu->stop_id, train_name ? strdup(train_name) : "no train name",
-                                    train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
-                 /*
-                  * printf("%s train arriving to stop: %s at: %s\n", train_name, lookup_stopmap(&sm, stu->stop_id), ctime(&t));
-                  * printf("%s train arriving to stop: %s at: %li\n", train_name, lookup_stopmap(&sm, stu->stop_id), t-cur_time);
-                 */
-                 if(0)printf("%sbound %s train arriving at stop: %s in: %li seconds\n",
-                       (train_direction(stu->stop_id) == 1) ? "north" : "south",
-                       train_name, lookup_stopmap(&sm, stu->stop_id, NULL), t-cur_time);
-            }
-        }
-        struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
-        struct train_arrival** arrivals;
-        char* stop_name = lookup_stopmap(&sm, b[2], &dir);
-        _Bool train_lines[200] = {0}, negative;
-        int mins, secs;
+    if(!stop_name)stop_name = b[2];
+    
+    n_upcoming = atoi(b[1]);
 
-        for(int i = 3; i < a; ++i){
-            train_lines[(int)*b[i]] = 1;
-        }
-
-        if(!stop_name)stop_name = b[2];
-        
-        n_upcoming = atoi(b[1]);
-
-        cur_time = time(NULL);
-        printf("%i %s-bound upcoming arrivals to \"%s\":\n", n_upcoming, dirtostr(dir), stop_name);
-        if(ts){
-            arrivals = lookup_upcoming_arrivals(ts, a > 3 ? train_lines : NULL, cur_time, NONE, n_upcoming);
-            for(int i = 0; i < n_upcoming; ++i){
-                if(!arrivals[i])break;
-                conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
-                negative = mins < 0 || secs < 0;
-                /*printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);*/
-                printf("  %.2i: %s train arrive%s %.2i:%.2i%s", i+1, arrivals[i]->train, negative ? "d" : "s in", abs(mins), abs(secs), negative ? " ago" : "");
-                conv_time(arrivals[i]->departure-cur_time, &mins, &secs);
-                if(negative)printf(" and departs in %.2i:%.2i", mins, secs);
-                puts("");
-            }
+    cur_time = time(NULL);
+    printf("%i %s-bound upcoming arrivals to \"%s\":\n", n_upcoming, dirtostr(dir), stop_name);
+    if(ts){
+        arrivals = lookup_upcoming_arrivals(ts, a > 3 ? train_lines : NULL, cur_time, NONE, n_upcoming);
+        for(int i = 0; i < n_upcoming; ++i){
+            if(!arrivals[i])break;
+            conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
+            negative = mins < 0 || secs < 0;
+            /*delay should be red, early green*/
+            /*printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);*/
+            printf("  %.2i: %s train arrive%s %.2i:%.2i%s", i+1, arrivals[i]->train, negative ? "d" : "s in", abs(mins), abs(secs), negative ? " ago" : "");
+            conv_time(arrivals[i]->departure-cur_time, &mins, &secs);
+            if(negative)printf(" and departs in %.2i:%.2i", mins, secs);
+            puts("");
         }
     }
 }
-/*
- * shouldn't be hard to keep arrivals list sorted!!! if time < first index, save some time and insert there!
- * we don't have to check this way for duplicates too!
-*/
