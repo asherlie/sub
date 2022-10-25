@@ -169,8 +169,9 @@ void conv_time(time_t arrival, int* mins, int* secs){
     *secs = arrival-(*mins*60);
 }
 
-void feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta){
+int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta){
     char* train_name = NULL;
+    int insertions = 0;
     for(size_t i = 0; i < feedmsg->n_entity; ++i){
         TransitRealtime__FeedEntity* e = feedmsg->entity[i];
         if(e->vehicle)train_name = e->vehicle->trip->route_id;
@@ -184,16 +185,27 @@ void feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, str
 
             t = stu->arrival->time;
             /* why would train_name == NULL? */
-            insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "no train name",
+            insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "mystery",
                                 train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
+            ++insertions;
         }
     }
+    return insertions;
 }
 
-/*
- * void populate_train_arrivals(struct train_arrivals* ta, enum train train_line){
- * }
-*/
+int populate_train_arrivals(struct train_arrivals* ta, enum train train_line){
+    /* TODO: free mem */
+    struct mta_req* mr = setup_mr();
+    TransitRealtime__FeedMessage* fm;
+    int len;
+    CURLcode res;
+    /* TODO: free */
+    uint8_t* data = mta_request(mr, train_line, &len, &res);
+    ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
+
+    if(!(fm = transit_realtime__feed_message__unpack(&allocator, len, data)))return 0;
+    return feedmsg_to_train_arrivals(fm, ta);
+}
  
 /* TODO: combine all train lines in one struct train_arrivals
  * TODO: move all code to a separate file
@@ -202,23 +214,14 @@ void feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, str
  * <> n_upcoming stop_id train_name
  */
 int main(int a, char** b){
-    struct mta_req* mr = setup_mr();
-
     struct stopmap sm;
     FILE* fp;
     time_t cur_time;
-
-    uint8_t* data;
-    int len;
-    CURLcode res;
-    ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
     enum direction dir;
 
     struct train_arrivals ta;
     int n_upcoming;
-
-    TransitRealtime__FeedMessage* feedmsg;
 
     if(a < 3)return 1;
 
@@ -231,14 +234,20 @@ int main(int a, char** b){
 
     init_train_arrivals(&ta, 1200);
 
-    data = mta_request(mr, NUMBERS, &len, &res);
+    /* hmm - almost all of these contain no trip updates */
+    populate_train_arrivals(&ta, ACE);
+    populate_train_arrivals(&ta, BDFM);
+    populate_train_arrivals(&ta, G);
+    populate_train_arrivals(&ta, NUMBERS);
+    populate_train_arrivals(&ta, JZ);
+    populate_train_arrivals(&ta, NQRW);
+    populate_train_arrivals(&ta, L);
+
     cur_time = time(NULL);
 
-    if(!(feedmsg = transit_realtime__feed_message__unpack(&allocator, len, data)))return 1;
     /*
      * we can print N upcoming trains based on responses, they're sorted by arrival time
     */
-    feedmsg_to_train_arrivals(feedmsg, &ta);
     struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
     struct train_arrival** arrivals;
     char* stop_name = lookup_stopmap(&sm, b[2], &dir);
@@ -262,8 +271,9 @@ int main(int a, char** b){
             conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
             negative = mins < 0 || secs < 0;
             /*delay should be red, early green*/
-            /*printf("  %.2i: %s train in %.2i:%.2i\n", i+1, arrivals[i]->train, mins, secs);*/
-            printf("  %.2i: %s train arrive%s %.2i:%.2i%s", i+1, arrivals[i]->train, negative ? "d" : "s in", abs(mins), abs(secs), negative ? " ago" : "");
+            printf("  %.2i: %s train arrive%s %.2i:%.2i%s", 
+                    i+1, arrivals[i]->train, negative ? "d" : "s in", 
+                    abs(mins), abs(secs), negative ? " ago" : "");
             conv_time(arrivals[i]->departure-cur_time, &mins, &secs);
             if(negative)printf(" and departs in %.2i:%.2i", mins, secs);
             puts("");
