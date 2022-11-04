@@ -23,6 +23,8 @@ struct train_arrival{
 
 struct train_stop{
     char* stop_id;
+    char lat[9];
+    char lon[9];
     /* sorted linked list of arrivals */
     /* TODO: should north and southbound arrivals be in separated lists? */
     struct train_arrival* arrivals;

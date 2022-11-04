@@ -22,8 +22,10 @@ void pb_free(void* alloc_data, void* ptr){
 enum direction train_direction(char* stop_id){
     switch(stop_id[strlen(stop_id)-1]){
         case 'N':
+        case 'n':
             return NORTH;
         case 'S':
+        case 's':
             return SOUTH;
     }
     return NONE;
@@ -34,11 +36,26 @@ void init_train_arrivals(struct train_arrivals* ta, int n_buckets){
     ta->train_stop_buckets = calloc(n_buckets, sizeof(struct train_stop*));
 }
 
-struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* stop_id, _Bool create_missing){
-    int stop_idx = stop_id_hash(stop_id, ta->n_buckets, NULL);
+struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* lat, char* lon, _Bool create_missing){
+/*
+ *     we'll be using full train name as a hash - unless there's a better id - station id maybe
+ *     stop id is stop and train line
+ *     aha! use lat long
+ *     obviously LOL
+ *     
+ *     sum of every single digit - pretty random will have good spread
+ *     can check if we found our exact stop by using lat long
+ * 
+ *     or we can check using strcmp() if we'd like
+*/
+
+    /*int stop_idx = stop_id_hash(stop_id, ta->n_buckets, NULL);*/
+    int stop_idx = lat_lon_hash(lat, lon, ta->n_buckets, LAT_LON_PRECISION);
     struct train_stop* ts = ta->train_stop_buckets[stop_idx], * prev = NULL;
     for(; ts; ts = ts->next){
-        if(!strcmp(ts->stop_id, stop_id))return ts;
+        /*if(!memcmp(ts->lat, lat, 9) && !memcmp(ts->lon, lon, 10))return ts;*/
+        /*ts->lat is only 2 bytes after the period - latloncmp is returning equality when it shouldn't */
+        if(latloncmp(ts->lat, lat, LAT_LON_PRECISION) && latloncmp(ts->lon, lon, LAT_LON_PRECISION))return ts;
         prev = ts;
     }
     if(!create_missing)return NULL;
@@ -46,7 +63,9 @@ struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* s
     ts = malloc(sizeof(struct train_stop));
     ts->next = NULL;
     ts->arrivals = NULL;
-    ts->stop_id = strdup(stop_id);
+    /*ts->stop_id = strdup(stop_id);*/
+    memcpy(ts->lat, lat, LAT_LON_PRECISION);
+    memcpy(ts->lon, lon, LAT_LON_PRECISION+1);
     if(!prev){
         ta->train_stop_buckets[stop_idx] = ts;
     }
@@ -68,8 +87,8 @@ struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* s
 // because this is only relevant for this applicatin once we know the station and train already - we just need 
 // an identifier to know which scheduled arrival this is for updating
 // we can probably use just the number at the end of trip_id
-struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* stop_id, char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
-    struct train_stop* ts = lookup_train_stop_internal(ta, stop_id, 1);
+struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* lat, char* lon, char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
+    struct train_stop* ts = lookup_train_stop_internal(ta, lat, lon, 1);
     /*int updates = 0;*/
     /* is there a unique identifier i can compare? need to commpare specific arrivals to make sure they're the same
      * in case we're updating an existing one
@@ -129,14 +148,8 @@ struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* stop_
     return tmp_arr;
 }
 
-struct train_stop* lookup_train_stop(struct train_arrivals* ta, char* stop_name, char* stop_id){
-     char* stop_id_final = stop_id;
- 
-     // TODO: we should look up stop_id
-     if(!stop_id_final){
-        stop_id_final = stop_name;
-     }
-     return lookup_train_stop_internal(ta, stop_id_final, 0);
+struct train_stop* lookup_train_stop(struct train_arrivals* ta, char* lat, char* lon){
+     return lookup_train_stop_internal(ta, lat, lon, 0);
 }
 /*should print 'arrived _ minutes ago, departing in _' if in past*/
 // TODO: should the indexing function ignore N/S? that way we can look at all arrivals in one place
@@ -169,8 +182,9 @@ void conv_time(time_t arrival, int* mins, int* secs){
     *secs = arrival-(*mins*60);
 }
 
-int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta){
+int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map){
     char* train_name = NULL;
+    struct stop* s;
     int insertions = 0;
     for(size_t i = 0; i < feedmsg->n_entity; ++i){
         TransitRealtime__FeedEntity* e = feedmsg->entity[i];
@@ -185,15 +199,33 @@ int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, stru
 
             t = stu->arrival->time;
             /* why would train_name == NULL? */
-            insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "mystery",
-                                train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
+            /*might need to look up lat, lon in a map indexed by stop_id*/
+            // okay, we have stop_id as provided by stu - we need lat/lon
+            // for now i'll be writing a new hashmap that correlates stop_ids with lat/lon
+            // should be able to lookup a stop's lat/lon
+            // this lookup table will be unchanging and should be written to a file and loaded on startup
+            // or even hardcoded programmatically into a c file
+            //
+            // write another program that appends it to a c file
+            //
+            // this could even just take in a stop* that it hashes, nay same shite
+            /*
+             * insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "mystery",
+             *                     train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
+            */
+            // L28S is being looked up and doesn't exist!
+            s = lookup_stop_lat_lon(stop_id_map, stu->stop_id);
+            if(!s);
+            else insert_arrival_time(ta, s->lat, s->lon, train_name ? strdup(train_name) : "mystery",
+                                train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0,
+                                stu->arrival->delay);
             ++insertions;
         }
     }
     return insertions;
 }
 
-int populate_train_arrivals(struct train_arrivals* ta, enum train train_line){
+int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, struct stopmap* stop_id_map){
     /* TODO: free mem */
     struct mta_req* mr = setup_mr();
     TransitRealtime__FeedMessage* fm;
@@ -204,21 +236,25 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line){
     ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
     if(!(fm = transit_realtime__feed_message__unpack(&allocator, len, data)))return 0;
-    return feedmsg_to_train_arrivals(fm, ta);
+    return feedmsg_to_train_arrivals(fm, ta, stop_id_map);
 }
  
 /* TODO: combine all train lines in one struct train_arrivals
  * TODO: move all code to a separate file
  *          once code is separated i'll be able to easily add diff lines to the same struct
  * TODO: add example to continuously update arrival of a given train or trains at stations
- * <> n_upcoming stop_id train_name
+ * <> n_upcoming lat lon train_name
+ * <> n_upcoming lat lon direction train_name
  */
 int main(int a, char** b){
-    struct stopmap sm;
+
+    /*printf("llhash: %i\n", lat_lon_hash("40.884667", "-73.90087", 40));*/
+
+    struct stopmap stop_id_map, lat_lon_map;
     FILE* fp;
     time_t cur_time;
 
-    enum direction dir;
+    enum direction dir = (a > 4) ? train_direction(b[4]) : NONE;
 
     struct train_arrivals ta;
     int n_upcoming;
@@ -228,35 +264,80 @@ int main(int a, char** b){
     (void)url_lookup;
 
     fp = fopen("mta_txt/stops.txt", "r");
-    init_stopmap(&sm, 1200);
-    build_stopmap(&sm, fp);
+    init_stopmap(&stop_id_map, 1200);
+    init_stopmap(&lat_lon_map, 1200);
+    build_stopmap(&lat_lon_map, &stop_id_map, fp);
     fclose(fp);
 
     init_train_arrivals(&ta, 1200);
 
-    /* hmm - almost all of these contain no trip updates */
-    populate_train_arrivals(&ta, ACE);
-    populate_train_arrivals(&ta, BDFM);
-    populate_train_arrivals(&ta, G);
-    populate_train_arrivals(&ta, NUMBERS);
-    populate_train_arrivals(&ta, JZ);
-    populate_train_arrivals(&ta, NQRW);
-    populate_train_arrivals(&ta, L);
+    /*
+     * DAMN - misunderstanding - stop_id refers only to train line at specific station
+     * i'll need to adjust my hash_map to use the string from stops.txt as the stop_name
+     * this is a bit better i guess too
+     * shouldn't be too tough, will have to replace not much
+     * just write new hashing function
+    */
+
+    /*
+     * printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE));
+     * printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM));
+     * printf("%i arrivals inserted from G));\n", populate_train_arrivals(&ta, G));
+     * printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS));
+     * printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ));
+     * printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW));
+    */
+    /*printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE, &stop_id_map));*/
+    /*printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM, &stop_id_map));*/
+    /*printf("%i arrivals inserted from G\n", populate_train_arrivals(&ta, G, &stop_id_map));*/
+    /*printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS, &stop_id_map));*/
+    /*printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ, &stop_id_map));*/
+    /*printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW, &stop_id_map));*/
+    /*printf("%i arrivals inserted from L\n", populate_train_arrivals(&ta, L, &stop_id_map));*/
 
     cur_time = time(NULL);
 
     /*
      * we can print N upcoming trains based on responses, they're sorted by arrival time
     */
-    struct train_stop* ts = lookup_train_stop(&ta, NULL, b[2]);
+    // this is returning NULL when it shouldn't
+    /*THIS IS RETURNING NULL! fix this, everything is working*/
+    /*found the prob :) too much precision! - lat lon is very precise
+     * i only need to use 2 decimal points
+     */
+    struct train_stop* ts;
     struct train_arrival** arrivals;
-    char* stop_name = lookup_stopmap(&sm, b[2], &dir);
-    _Bool train_lines[200] = {0}, negative;
+    /* TODO: need to be able to look up stop name from lat lon */
+    char* stop_name = lookup_stop_name(&lat_lon_map, b[2], b[3], NULL);
+    _Bool train_lines[200] = {0}, negative, specific_pop = 0;
     int mins, secs;
 
-    for(int i = 3; i < a; ++i){
+    if(!stop_name){
+        puts("no stop found at lat/lon");
+        return 1;
+    }
+
+    // TODO: populate ta based on the train_lines map
+    for(int i = 5; i < a; ++i){
+        printf("processed %i arrivals from %c\n", populate_train_arrivals(&ta, traintotrain(*b[i]), &stop_id_map), *b[i]);
+        specific_pop = 1;
         train_lines[(int)*b[i]] = 1;
     }
+
+    /* TODO: selectively populate based on which train lines stop at which station
+     * in the event that no train line is specified
+     */
+    if(!specific_pop){
+        printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE, &stop_id_map));
+        printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM, &stop_id_map));
+        printf("%i arrivals inserted from G\n", populate_train_arrivals(&ta, G, &stop_id_map));
+        printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS, &stop_id_map));
+        printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ, &stop_id_map));
+        printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW, &stop_id_map));
+        printf("%i arrivals inserted from L\n", populate_train_arrivals(&ta, L, &stop_id_map));
+    }
+
+    ts = lookup_train_stop(&ta, b[2], b[3]);
 
     if(!stop_name)stop_name = b[2];
     
@@ -265,14 +346,19 @@ int main(int a, char** b){
     cur_time = time(NULL);
     printf("%i %s-bound upcoming arrivals to \"%s\":\n", n_upcoming, dirtostr(dir), stop_name);
     if(ts){
-        arrivals = lookup_upcoming_arrivals(ts, a > 3 ? train_lines : NULL, cur_time, NONE, n_upcoming);
-        for(int i = 0; i < n_upcoming; ++i){
+        arrivals = lookup_upcoming_arrivals(ts, a > 5 ? train_lines : NULL, cur_time, NONE, n_upcoming);
+        for(int i = 0, found = 0; found < n_upcoming; ++i){
             if(!arrivals[i])break;
+            if(dir != NONE && dir != arrivals[i]->dir){
+                /*++n_upcoming;*/
+                /*--i;*/
+                continue;
+            }
             conv_time(arrivals[i]->arrival-cur_time, &mins, &secs);
             negative = mins < 0 || secs < 0;
             /*delay should be red, early green*/
             printf("  %.2i: %s train arrive%s %.2i:%.2i%s", 
-                    i+1, arrivals[i]->train, negative ? "d" : "s in", 
+                    ++found, arrivals[i]->train, negative ? "d" : "s in", 
                     abs(mins), abs(secs), negative ? " ago" : "");
             conv_time(arrivals[i]->departure-cur_time, &mins, &secs);
             if(negative)printf(" and departs in %.2i:%.2i", mins, secs);
