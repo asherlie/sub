@@ -18,6 +18,8 @@ struct mta_req{
 
 static const char* url_lookup[7] = {"-ace", "-bdfm", "-g", "-jz", "-nqrw", "-l", ""};
 static const int url_lookup_len[7] = {4, 5, 2, 3, 5, 2, 0};
+
+enum train traintotrain(char train);
 /*
  * const char* url_lookup[7];
  * const int url_lookup_len[7];

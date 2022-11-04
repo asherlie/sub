@@ -38,6 +38,58 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     return size*nmemb;
 }
 
+enum train traintotrain(char train){
+    switch(train){
+        case 'A':
+        case 'a':
+        case 'C':
+        case 'c':
+        case 'E':
+        case 'e':
+            return ACE;
+        
+        case 'B':
+        case 'b':
+        case 'D':
+        case 'd':
+        case 'F':
+        case 'f':
+        case 'M':
+        case 'm':
+            return BDFM; 
+        case 'G':
+        case 'g':
+            return G;
+        
+        case 'J':
+        case 'j':
+        case 'Z':
+        case 'z':
+            return JZ;
+        case 'N':
+        case 'n':
+        case 'Q':
+        case 'q':
+        case 'R':
+        case 'r':
+        case 'W':
+        case 'w':
+            return NQRW;
+        case 'L':
+        case 'l':
+            return L;
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+            return NUMBERS;
+    }
+    return NUMBERS;
+}
+
 struct mta_req* setup_mr(){
     struct mta_req* mr = malloc(sizeof(struct mta_req));
     curl_global_init(CURL_GLOBAL_DEFAULT);
