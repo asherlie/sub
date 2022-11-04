@@ -34,6 +34,7 @@ enum direction train_direction(char* stop_id){
 void init_train_arrivals(struct train_arrivals* ta, int n_buckets){
     ta->n_buckets = n_buckets;
     ta->train_stop_buckets = calloc(n_buckets, sizeof(struct train_stop*));
+    memset(ta->pop_map, 0, TRAIN_MAX);
 }
 
 struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* lat, char* lon, _Bool create_missing){
@@ -236,6 +237,7 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
     ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
     if(!(fm = transit_realtime__feed_message__unpack(&allocator, len, data)))return 0;
+    ta->pop_map[train_line] = 1;
     return feedmsg_to_train_arrivals(fm, ta, stop_id_map);
 }
  
@@ -307,6 +309,7 @@ int main(int a, char** b){
      */
     struct train_stop* ts;
     struct train_arrival** arrivals;
+    enum train train_line;
     /* TODO: need to be able to look up stop name from lat lon */
     char* stop_name = lookup_stop_name(&lat_lon_map, b[2], b[3], NULL);
     _Bool train_lines[200] = {0}, negative, specific_pop = 0;
@@ -319,7 +322,9 @@ int main(int a, char** b){
 
     // TODO: populate ta based on the train_lines map
     for(int i = 5; i < a; ++i){
-        printf("processed %i arrivals from %c\n", populate_train_arrivals(&ta, traintotrain(*b[i]), &stop_id_map), *b[i]);
+        train_line = traintotrain(*b[i]);
+        /*if(!ta.pop_map[train_line])printf("processed %i arrivals from %c\n", populate_train_arrivals(&ta, train_line, &stop_id_map), *b[i]);*/
+        if(!ta.pop_map[train_line])populate_train_arrivals(&ta, train_line, &stop_id_map);
         specific_pop = 1;
         train_lines[(int)*b[i]] = 1;
     }

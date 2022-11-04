@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "dir.h"
+#include "gtfs_req.h"
 
 struct train_arrival{
     enum direction dir;
@@ -34,6 +35,8 @@ struct train_stop{
 struct train_arrivals{
     int n_buckets;
     struct train_stop** train_stop_buckets;
+
+    _Bool pop_map[TRAIN_MAX];
 };
 
 /*
