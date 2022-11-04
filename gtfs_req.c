@@ -87,7 +87,7 @@ enum train traintotrain(char train){
         case '7':
             return NUMBERS;
     }
-    return NUMBERS;
+    return TRAIN_MAX;
 }
 
 struct mta_req* setup_mr(){

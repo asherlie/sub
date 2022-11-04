@@ -1,3 +1,5 @@
+#ifndef _GTFS_REQ
+#define _GTFS_REQ
 #include <stdint.h>
 #include <curl/curl.h>
 
@@ -8,7 +10,8 @@ enum train{
     JZ,
     NQRW,
     L,
-    NUMBERS
+    NUMBERS,
+    TRAIN_MAX
 };
 
 struct mta_req{
@@ -29,3 +32,4 @@ struct mta_req* setup_mr();
 void cleanup_mr(struct mta_req* mr);
 
 uint8_t* mta_request(struct mta_req* mr, enum train line, int* len, CURLcode* res);
+#endif
