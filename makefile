@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS= -Wall -Wextra -Wpedantic -Werror -O3 -lprotobuf-c -lcurl -lm
+CFLAGS= -Wall -Wextra -Wpedantic -Werror -g3 -lprotobuf-c -lcurl -lm
 gtzip="http://web.mta.info/developers/data/nyct/subway/google_transit.zip"
 
 all: sub
@@ -22,10 +22,10 @@ gtfs-realtime.pb-c.c: gtfs-realtime.proto
 
 dir.o: dir.c dir.h
 
-stopmap.o: stopmap.c mta_txt dir.o
+stopmap.o: stopmap.c mta_txt dir.o stopmap.h
 	$(CC) $(CFLAGS) stopmap.c -c -o stopmap.o
 
-sub: sub.c gtfs_req.o gtfs-realtime.pb-c.c stopmap.o
+sub: sub.c sub.h gtfs_req.o gtfs-realtime.pb-c.c stopmap.o
 	$(CC) $(CFLAGS) sub.c gtfs-realtime.pb-c.c gtfs_req.o stopmap.o -o sub dir.o
 
 gtfs_req.o: gtfs_req.c
