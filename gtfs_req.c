@@ -38,6 +38,9 @@ size_t curl_writefunc(void* buf, size_t size, size_t nmemb, void* vmem){
     return size*nmemb;
 }
 
+/*TODO: this doesn't work with FS - franklin shuttle! - this is 
+ * contained in ACE
+ */
 enum train traintotrain(char train){
     switch(train){
         case 'A':
@@ -46,6 +49,9 @@ enum train traintotrain(char train){
         case 'c':
         case 'E':
         case 'e':
+        /* shuttles are contained in ACE responses */
+        case 'S':
+        case 's':
             return ACE;
         
         case 'B':
