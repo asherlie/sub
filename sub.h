@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <pthread.h>
 
 #include "dir.h"
 #include "gtfs_req.h"
@@ -35,6 +36,8 @@ struct train_stop{
 struct train_arrivals{
     int n_buckets;
     struct train_stop** train_stop_buckets;
+    pthread_mutex_t** bucket_locks;
+    pthread_mutex_t* next_lock;
 
     _Bool pop_map[TRAIN_MAX];
 };

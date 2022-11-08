@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
+#include <stdatomic.h>
 
 #include "sub.h"
 #include "dir.h"
@@ -34,10 +36,15 @@ enum direction train_direction(char* stop_id){
 void init_train_arrivals(struct train_arrivals* ta, int n_buckets){
     ta->n_buckets = n_buckets;
     ta->train_stop_buckets = calloc(n_buckets, sizeof(struct train_stop*));
+    ta->bucket_locks = calloc(sizeof(pthread_mutex_t*), ta->n_buckets);
+    ta->next_lock = malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(ta->next_lock, NULL);
     memset(ta->pop_map, 0, TRAIN_MAX);
 }
 
-struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* lat, char* lon, _Bool create_missing){
+// do we need to lock in every circumstance - what if !create_missing - we do! because other threads might be inserting
+// even if we're only reading
+struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* lat, char* lon, _Bool create_missing, pthread_mutex_t** bucket_lock){
 /*
  *     we'll be using full train name as a hash - unless there's a better id - station id maybe
  *     stop id is stop and train line
@@ -51,8 +58,32 @@ struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* l
 */
 
     /*int stop_idx = stop_id_hash(stop_id, ta->n_buckets, NULL);*/
+    // can use a lock for each stop_idx, acquire it here 
     int stop_idx = lat_lon_hash(lat, lon, ta->n_buckets, LAT_LON_PRECISION);
-    struct train_stop* ts = ta->train_stop_buckets[stop_idx], * prev = NULL;
+    struct train_stop* ts, * prev = NULL;
+    pthread_mutex_t* nul_lock = NULL, * tmp_lock;
+    /*if(atomic_compare_exchange_strong(ta->bucket_locks+stop_idx, (pthread_mutex_t**)NULL, ta->next_lock)){*/
+    /* this may not exactly be threadsafe - what if next_lock is allocated but not initialized
+     */
+    if(atomic_compare_exchange_strong(ta->bucket_locks+stop_idx, &nul_lock, ta->next_lock)){
+        /*printf("INITIALIZED NEW LOCK FOR IDX: %i\n", stop_idx);*/
+        tmp_lock = malloc(sizeof(pthread_mutex_t));
+        pthread_mutex_init(tmp_lock, NULL);
+        /* in the worst case, next_lock can be re-used
+         * this would occur when two NUL locks are found before either thread gets a chance
+         * to update ta->next_lock
+         */
+        atomic_store(&ta->next_lock, tmp_lock);
+    }
+    *bucket_lock = ta->bucket_locks[stop_idx];
+    pthread_mutex_lock(*bucket_lock);
+    /**bucket_lock = */
+    // we can do a CAS to set our new mutex if not exist
+    // we can do this by always keeping a pre-initialized mutex attached to ta
+    // member: pthread_mutex_t* next_mutex
+    // then if CAS call is a success, we can just initialize a new mutex
+    // pthread_mutex_lock
+    ts = ta->train_stop_buckets[stop_idx];
     for(; ts; ts = ts->next){
         /*if(!memcmp(ts->lat, lat, 9) && !memcmp(ts->lon, lon, 10))return ts;*/
         /*ts->lat is only 2 bytes after the period - latloncmp is returning equality when it shouldn't */
@@ -88,8 +119,13 @@ struct train_stop* lookup_train_stop_internal(struct train_arrivals* ta, char* l
 // because this is only relevant for this applicatin once we know the station and train already - we just need 
 // an identifier to know which scheduled arrival this is for updating
 // we can probably use just the number at the end of trip_id
+// must be threadsafe - if this is, we'll be good to parallely populate()
+// there will be a lock for each lat lon bucket, initialized when we insert a new lat lon bucket
+// lookup_train_stop_internal() will set a lock ptr that we release at the end of this function
 struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* lat, char* lon, char* train, enum direction dir, time_t time, time_t departure, int32_t delay){
-    struct train_stop* ts = lookup_train_stop_internal(ta, lat, lon, 1);
+    // is this threadsafe? nope - this is where insertion occurs
+    pthread_mutex_t* lock;
+    struct train_stop* ts = lookup_train_stop_internal(ta, lat, lon, 1, &lock);
     /*int updates = 0;*/
     /* is there a unique identifier i can compare? need to commpare specific arrivals to make sure they're the same
      * in case we're updating an existing one
@@ -113,6 +149,7 @@ struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* lat, 
                 arr->departure = departure;
                 arr->delay = delay;
                 /*puts("updated existing");*/
+                pthread_mutex_unlock(lock);
                 return arr;
             }
             /* we know to insert between prev and arr */
@@ -136,7 +173,7 @@ struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* lat, 
         prev_arr = ts->arrivals;
         tmp_arr->next = prev_arr;
         ts->arrivals = tmp_arr;
-        return tmp_arr;
+        goto RET;
     }
     if(!prev_arr){
         ts->arrivals = tmp_arr;
@@ -146,11 +183,17 @@ struct train_arrival* insert_arrival_time(struct train_arrivals* ta, char* lat, 
         prev_arr->next = tmp_arr;
         tmp_arr->next = arr;
     }
+    RET:
+    pthread_mutex_unlock(lock);
     return tmp_arr;
 }
 
 struct train_stop* lookup_train_stop(struct train_arrivals* ta, char* lat, char* lon){
-     return lookup_train_stop_internal(ta, lat, lon, 0);
+     struct train_stop* ret;
+     pthread_mutex_t* lock;
+     ret = lookup_train_stop_internal(ta, lat, lon, 0, &lock);
+     pthread_mutex_unlock(lock);
+     return ret;
 }
 /*should print 'arrived _ minutes ago, departing in _' if in past*/
 // TODO: should the indexing function ignore N/S? that way we can look at all arrivals in one place
@@ -170,7 +213,8 @@ struct train_arrival** lookup_upcoming_arrivals(struct train_stop* ts, _Bool* tr
         /*if(ta->arrival > ((ta->departure) ? ta->departure : cur_time-secs_before_departure) && */
         if((ta->departure ? ta->departure : ta->arrival+secs_before_departure) > cur_time &&
         /*if(ta->arrival > cur_time-secs_before_departure && */
-           (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train])){
+                                                                                               /* this occurs with shuttles */
+           (dir == NONE || ta->dir == dir) && (!train_lines || train_lines[(int)*ta->train] || (ta->train[1] && train_lines[(int)ta->train[1]]))){
                /*printf("departure: %li\n", ta->departure);*/
                arrivals[idx++] = ta;
            }
@@ -183,6 +227,9 @@ void conv_time(time_t arrival, int* mins, int* secs){
     *secs = arrival-(*mins*60);
 }
 
+// must be threadsafe - lock free!
+// or individual locks for each _
+// TODO: because insert_arrival_time() is threadsafe, we can make this multithreaded even within a single feemdsg
 int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map){
     char* train_name = NULL;
     struct stop* s;
@@ -214,15 +261,16 @@ int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, stru
              * insert_arrival_time(ta, stu->stop_id, train_name ? strdup(train_name) : "mystery",
              *                     train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0, stu->arrival->delay);
             */
-            // L28S is being looked up and doesn't exist!
             s = lookup_stop_lat_lon(stop_id_map, stu->stop_id);
             if(!s);
+            // only this needs to be threadsafe - insert_arrival_time()
             else insert_arrival_time(ta, s->lat, s->lon, train_name ? strdup(train_name) : "mystery",
                                 train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0,
                                 stu->arrival->delay);
             ++insertions;
         }
     }
+    /*printf("inserted %i entries  ");*/
     return insertions;
 }
 
@@ -233,12 +281,45 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
     int len;
     CURLcode res;
     /* TODO: free */
+                                 // train_line is nonce
     uint8_t* data = mta_request(mr, train_line, &len, &res);
     ProtobufCAllocator allocator = {.alloc=pb_malloc, .free=pb_free, .allocator_data=NULL};
 
     if(!(fm = transit_realtime__feed_message__unpack(&allocator, len, data)))return 0;
     ta->pop_map[train_line] = 1;
+    /*we can also likely use multiple threads to populate from a single feedmsg
+     * def can actually, with minimal changes!
+     * just need to 
+     */
     return feedmsg_to_train_arrivals(fm, ta, stop_id_map);
+}
+
+struct pta_arg{
+    struct train_arrivals* ta;
+    enum train train_line;
+    struct stopmap* stop_id_map;
+    int* n_entries;
+};
+
+void* populate_train_arrivals_th(void* v_pta_arg){
+    struct pta_arg* pta_arg = v_pta_arg;
+    int n_entries;
+    n_entries = populate_train_arrivals(pta_arg->ta, pta_arg->train_line, pta_arg->stop_id_map);
+    if(pta_arg->n_entries)*pta_arg->n_entries = n_entries;
+    free(pta_arg);
+    return NULL;
+}
+
+pthread_t concurrent_populate_train_arrivals(struct train_arrivals* ta, enum train train_line, struct stopmap* stop_id_map){
+    pthread_t ret;
+    /*this is getting corrupted, stop_id_map is invalidated somehow*/
+    struct pta_arg* pta_arg = malloc(sizeof(struct pta_arg));
+    pta_arg->ta = ta;
+    pta_arg->train_line = train_line;
+    pta_arg->stop_id_map = stop_id_map;
+    pta_arg->n_entries = NULL;
+    pthread_create(&ret, NULL, populate_train_arrivals_th, pta_arg);
+    return ret;
 }
  
 /* TODO: combine all train lines in one struct train_arrivals
@@ -273,46 +354,17 @@ int main(int a, char** b){
 
     init_train_arrivals(&ta, 1200);
 
-    /*
-     * DAMN - misunderstanding - stop_id refers only to train line at specific station
-     * i'll need to adjust my hash_map to use the string from stops.txt as the stop_name
-     * this is a bit better i guess too
-     * shouldn't be too tough, will have to replace not much
-     * just write new hashing function
-    */
-
-    /*
-     * printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE));
-     * printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM));
-     * printf("%i arrivals inserted from G));\n", populate_train_arrivals(&ta, G));
-     * printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS));
-     * printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ));
-     * printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW));
-    */
-    /*printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE, &stop_id_map));*/
-    /*printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM, &stop_id_map));*/
-    /*printf("%i arrivals inserted from G\n", populate_train_arrivals(&ta, G, &stop_id_map));*/
-    /*printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS, &stop_id_map));*/
-    /*printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ, &stop_id_map));*/
-    /*printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW, &stop_id_map));*/
-    /*printf("%i arrivals inserted from L\n", populate_train_arrivals(&ta, L, &stop_id_map));*/
-
     cur_time = time(NULL);
 
-    /*
-     * we can print N upcoming trains based on responses, they're sorted by arrival time
-    */
-    // this is returning NULL when it shouldn't
-    /*THIS IS RETURNING NULL! fix this, everything is working*/
-    /*found the prob :) too much precision! - lat lon is very precise
-     * i only need to use 2 decimal points
-     */
     struct train_stop* ts;
     struct train_arrival** arrivals;
     enum train train_line;
     /* TODO: need to be able to look up stop name from lat lon */
     char* stop_name = lookup_stop_name(&lat_lon_map, b[2], b[3], NULL);
     _Bool train_lines[200] = {0}, negative, specific_pop = 0;
+    _Bool pop_map[TRAIN_MAX] = {0};
+    pthread_t threads[TRAIN_MAX] = {0};
+    int n_threads = 0;
     int mins, secs;
 
     if(!stop_name){
@@ -321,25 +373,33 @@ int main(int a, char** b){
     }
 
     // TODO: populate ta based on the train_lines map
+    // all should be populated concurrently - need to make populate_train_arrivals() threadsafe
+    // greatly preferable would be lock free
     for(int i = 5; i < a; ++i){
         train_line = traintotrain(*b[i]);
         /*if(!ta.pop_map[train_line])printf("processed %i arrivals from %c\n", populate_train_arrivals(&ta, train_line, &stop_id_map), *b[i]);*/
-        if(!ta.pop_map[train_line])populate_train_arrivals(&ta, train_line, &stop_id_map);
+        /*if(!ta.pop_map[train_line])populate_train_arrivals(&ta, train_line, &stop_id_map);*/
+        pop_map[train_line] = 1;
         specific_pop = 1;
-        train_lines[(int)*b[i]] = 1;
+        train_lines[toupper(*b[i])] = 1;
     }
+    if(!specific_pop)
+        memset(pop_map, 1, TRAIN_MAX);
 
     /* TODO: selectively populate based on which train lines stop at which station
      * in the event that no train line is specified
      */
-    if(!specific_pop){
-        printf("%i arrivals inserted from ACE\n", populate_train_arrivals(&ta, ACE, &stop_id_map));
-        printf("%i arrivals inserted from BDFM\n", populate_train_arrivals(&ta, BDFM, &stop_id_map));
-        printf("%i arrivals inserted from G\n", populate_train_arrivals(&ta, G, &stop_id_map));
-        printf("%i arrivals inserted from NUMBERS\n", populate_train_arrivals(&ta, NUMBERS, &stop_id_map));
-        printf("%i arrivals inserted from JZ\n", populate_train_arrivals(&ta, JZ, &stop_id_map));
-        printf("%i arrivals inserted from NQRW\n", populate_train_arrivals(&ta, NQRW, &stop_id_map));
-        printf("%i arrivals inserted from L\n", populate_train_arrivals(&ta, L, &stop_id_map));
+    // TODO: if only one populate is called don't initialize locks!
+    for(enum train i = 0; i < TRAIN_MAX; ++i){
+        if(pop_map[i]){
+            /*printf("populating line %i: \"%s\"\n", i, url_lookup[i]);*/
+            threads[n_threads++] = concurrent_populate_train_arrivals(&ta, i, &stop_id_map);    
+            /*populate_train_arrivals(&ta, i, &stop_id_map);*/
+        }
+    }
+
+    for(int i = 0; i < n_threads; ++i){
+        pthread_join(threads[i], NULL);
     }
 
     ts = lookup_train_stop(&ta, b[2], b[3]);
