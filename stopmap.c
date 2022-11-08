@@ -13,6 +13,7 @@
 */
 
 void init_stopmap(struct stopmap* sm, int n_buckets){
+    /*ah! this is corrupted! n_buckets is too small somehow*/
     sm->n_buckets = n_buckets;
     sm->buckets = calloc(sizeof(struct stop*), n_buckets);
 }
@@ -59,11 +60,12 @@ _Bool latloncmp(char* a, char* b, int precision){
 }
 
 int lat_lon_hash(char* lat, char* lon, int n_buckets, int precision){
+    int ignore_leading = 3;
     int idx = 0;
     // assuming strlen(lat) == strlen(lon) == 9
     // the leading negative 
-    for(int i = 0; i < precision; ++i)
-        idx += ctoi(lat[i]) + ctoi(lon[i]);
+    for(int i = ignore_leading; i < precision; ++i)
+        idx += ctoi(lat[i])*pow(10, i-ignore_leading) + ctoi(lon[i])*pow(10, i-ignore_leading);
     idx += ctoi(lon[precision]);
     return idx % n_buckets;
 }
