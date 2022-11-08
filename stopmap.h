@@ -1,6 +1,6 @@
 #include "dir.h"
 
-#define LAT_LON_PRECISION 5
+#define LAT_LON_PRECISION 6
 
 /*
  * S30S
