@@ -1,6 +1,11 @@
 #include "dir.h"
 
-#define LAT_LON_PRECISION 6
+/* TODO: LAT_LON_PRECISION of 5 combines stations that shouldn't be - Franklin av/park place, for ex.
+ *       _                 _  6 distinguishes between ones that shouldn't be - Times Sq. 7/others
+ * TODO: dynamically chose precision case by case? - start at 8/9 and lose one char of precision until we're combining
+ *       dissimilar station names, then backtrack
+ */
+#define LAT_LON_PRECISION 5
 
 /*
  * S30S

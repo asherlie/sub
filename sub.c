@@ -381,7 +381,7 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
      * just need to 
      */
     /*printf("allocating %i threads to %i bytes\n", len/800, len);*/
-    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, len/800);
+    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, len/400);
     /*return feedmsg_to_train_arrivals(fm, ta, stop_id_map);*/
 }
 
