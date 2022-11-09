@@ -318,7 +318,7 @@ void* feedmsg_to_train_arrivals_th(void* v_f2ta_threadinfo){
         e = f2ta_arg->feedmsg->entity[entities];
         if(e->vehicle)train_name = e->vehicle->trip->route_id;
         if(!e->trip_update)continue;
-        for(size_t update_idx = 0; update_idx < e->trip_update->n_stop_time_update; ++update_idx){
+        for(size_t update_idx = f2ta_threadinfo->thread_idx; update_idx < e->trip_update->n_stop_time_update; update_idx += f2ta_arg->n_threads){
             stu = e->trip_update->stop_time_update[update_idx];
             if(!stu->arrival)continue;
 
@@ -379,7 +379,7 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
      * def can actually, with minimal changes!
      * just need to 
      */
-    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, 1);
+    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, 5);
     /*return feedmsg_to_train_arrivals(fm, ta, stop_id_map);*/
 }
 
