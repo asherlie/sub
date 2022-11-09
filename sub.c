@@ -229,11 +229,28 @@ void conv_time(time_t arrival, int* mins, int* secs){
 
 // must be threadsafe - lock free!
 // or individual locks for each _
-// TODO: because insert_arrival_time() is threadsafe, we can make this multithreaded even within a single feemdsg
-int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map){
+/* TODO: because insert_arrival_time() is threadsafe, we can make this multithreaded even within a single feemdsg */
+int feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map){
     char* train_name = NULL;
     struct stop* s;
     int insertions = 0;
+    /* need to use n threads per feedmsg 
+     * for j in n_stop_time_updates:
+     *  use thread j%n_threads 
+     *
+     *  could write a threadpool, use existing pool
+     *  or
+     *  make changes to the calling function - populate_train_arrivals()
+     *  i'll create a new function called concurrent_feedmsg_to_train_arrivals()
+     *  this is called by populate_train_arrivals()
+     *  it will spawn n_threads
+     *  and pass each thread a const pointer to the same feedmsg
+     *  each thread will be passed an index to start on
+     *  each thread will count by n_threads with logic as follows:
+     *      for(int i = start_idx; i < feedmsg_n_entries; i += n_threads)
+     *          insert_arrival_time()
+     *  this logic applies only to internal indices reflected by `j` below
+     */
     for(size_t i = 0; i < feedmsg->n_entity; ++i){
         TransitRealtime__FeedEntity* e = feedmsg->entity[i];
         if(e->vehicle)train_name = e->vehicle->trip->route_id;
@@ -272,6 +289,61 @@ int feedmsg_to_train_arrivals(struct TransitRealtime__FeedMessage* feedmsg, stru
     }
     /*printf("inserted %i entries  ");*/
     return insertions;
+}
+
+struct f2ta_arg{
+    const struct TransitRealtime__FeedMessage* feedmsg;
+    struct train_arrivals* ta;
+    struct stopmap* stop_id_map;
+    int n_threads;
+};
+
+void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
+    struct f2ta_arg* f2ta_arg = v_f2ta_arg;
+    char* train_name = NULL;
+    struct stop* s;
+    struct TransitRealtime__FeedEntity* e;
+    struct TransitRealtime__TripUpdate__StopTimeUpdate* stu;
+    time_t t;
+
+    for(size_t entities = 0; entities < f2ta_arg->feedmsg->n_entity; ++entities){
+        e = f2ta_arg->feedmsg->entity[entities];
+        if(!e->trip_update)continue;
+        if(e->vehicle)train_name = e->vehicle->trip->route_id;
+        for(size_t update_idx = 0; update_idx < e->trip_update->n_stop_time_update; ++update_idx){
+            stu = e->trip_update->stop_time_update[update_idx];
+            if(!stu->arrival)continue;
+
+            t = stu->arrival->time;
+            s = lookup_stop_lat_lon(f2ta_arg->stop_id_map, stu->stop_id);
+            if(s){
+                insert_arrival_time(f2ta_arg->ta, s->lat, s->lon, train_name ? strdup(train_name) : "mystery",
+                                    train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0,
+                                    stu->arrival->delay);
+            }
+        }
+    }
+    return NULL;
+}
+
+void concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map, int n_threads){
+    struct f2ta_arg* f2ta_arg = malloc(sizeof(struct f2ta_arg));
+    pthread_t threads[n_threads];
+
+    f2ta_arg->feedmsg = feedmsg;
+    f2ta_arg->ta = ta;
+    f2ta_arg->stop_id_map = stop_id_map;
+    f2ta_arg->n_threads = n_threads;
+
+    for(int i = 0; i < n_threads; ++i){
+        pthread_create(threads+i, NULL, feedmsg_to_train_arrivals_th, f2ta_arg);
+    }
+
+    // TODO: should we join threads here?
+    
+    for(int i = 0; i < n_threads; ++i){
+        pthread_join(threads[i], NULL);
+    }
 }
 
 int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, struct stopmap* stop_id_map){
@@ -390,6 +462,8 @@ int main(int a, char** b){
      * in the event that no train line is specified
      */
     // TODO: if only one populate is called don't initialize locks!
+    // TODO: see how much slower initializing locks is
+    // although this will be unnecessary if we concurrently insert within each train line population
     for(enum train i = 0; i < TRAIN_MAX; ++i){
         if(pop_map[i]){
             /*printf("populating line %i: \"%s\"\n", i, url_lookup[i]);*/
