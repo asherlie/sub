@@ -332,6 +332,7 @@ void* feedmsg_to_train_arrivals_th(void* v_f2ta_threadinfo){
             }
         }
     }
+    /*printf("thread %i inserted %i\n", f2ta_threadinfo->thread_idx, xx);*/
     return NULL;
 }
 
@@ -379,7 +380,8 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
      * def can actually, with minimal changes!
      * just need to 
      */
-    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, 5);
+    /*printf("allocating %i threads to %i bytes\n", len/800, len);*/
+    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, len/800);
     /*return feedmsg_to_train_arrivals(fm, ta, stop_id_map);*/
 }
 
@@ -436,12 +438,12 @@ int main(int a, char** b){
     (void)url_lookup;
 
     fp = fopen("mta_txt/stops.txt", "r");
-    init_stopmap(&stop_id_map, 1200);
-    init_stopmap(&lat_lon_map, 1200);
+    init_stopmap(&stop_id_map, 5000);
+    init_stopmap(&lat_lon_map, 5000);
     build_stopmap(&lat_lon_map, &stop_id_map, fp);
     fclose(fp);
 
-    init_train_arrivals(&ta, 1200);
+    init_train_arrivals(&ta, 5000);
 
     cur_time = time(NULL);
 
