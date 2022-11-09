@@ -296,6 +296,8 @@ struct f2ta_arg{
     struct train_arrivals* ta;
     struct stopmap* stop_id_map;
     int n_threads;
+
+    _Atomic int n_insertions;
 };
 
 void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
@@ -320,20 +322,23 @@ void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
                 insert_arrival_time(f2ta_arg->ta, s->lat, s->lon, train_name ? strdup(train_name) : "mystery",
                                     train_direction(stu->stop_id), t, stu->departure ? stu->departure->time : 0,
                                     stu->arrival->delay);
+                atomic_fetch_add(&f2ta_arg->n_insertions, 1);
             }
         }
     }
     return NULL;
 }
 
-void concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map, int n_threads){
+int concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map, int n_threads){
     struct f2ta_arg* f2ta_arg = malloc(sizeof(struct f2ta_arg));
     pthread_t threads[n_threads];
+    int ret;
 
     f2ta_arg->feedmsg = feedmsg;
     f2ta_arg->ta = ta;
     f2ta_arg->stop_id_map = stop_id_map;
     f2ta_arg->n_threads = n_threads;
+    f2ta_arg->n_insertions = 0;
 
     for(int i = 0; i < n_threads; ++i){
         pthread_create(threads+i, NULL, feedmsg_to_train_arrivals_th, f2ta_arg);
@@ -344,6 +349,9 @@ void concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMess
     for(int i = 0; i < n_threads; ++i){
         pthread_join(threads[i], NULL);
     }
+    ret = f2ta_arg->n_insertions;
+    free(f2ta_arg);
+    return ret;
 }
 
 int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, struct stopmap* stop_id_map){
