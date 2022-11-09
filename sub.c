@@ -341,7 +341,6 @@ int concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessa
     struct f2ta_threadinfo_arg f2ta_threadinfo[n_threads];
     struct f2ta_arg f2ta_arg;
     pthread_t threads[n_threads];
-    int ret;
 
     f2ta_arg.feedmsg = feedmsg;
     f2ta_arg.ta = ta;
@@ -360,8 +359,7 @@ int concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessa
     for(int i = 0; i < n_threads; ++i){
         pthread_join(threads[i], NULL);
     }
-    ret = f2ta_arg.n_insertions;
-    return ret;
+    return f2ta_arg.n_insertions;
 }
 
 int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, struct stopmap* stop_id_map){
