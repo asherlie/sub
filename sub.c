@@ -300,8 +300,14 @@ struct f2ta_arg{
     _Atomic int n_insertions;
 };
 
-void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
-    struct f2ta_arg* f2ta_arg = v_f2ta_arg;
+struct f2ta_threadinfo_arg{
+    struct f2ta_arg* f2ta_arg;
+    int thread_idx;
+};
+
+void* feedmsg_to_train_arrivals_th(void* v_f2ta_threadinfo){
+    struct f2ta_threadinfo_arg* f2ta_threadinfo = v_f2ta_threadinfo;
+    struct f2ta_arg* f2ta_arg = f2ta_threadinfo->f2ta_arg;
     char* train_name = NULL;
     struct stop* s;
     struct TransitRealtime__FeedEntity* e;
@@ -310,8 +316,8 @@ void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
 
     for(size_t entities = 0; entities < f2ta_arg->feedmsg->n_entity; ++entities){
         e = f2ta_arg->feedmsg->entity[entities];
-        if(!e->trip_update)continue;
         if(e->vehicle)train_name = e->vehicle->trip->route_id;
+        if(!e->trip_update)continue;
         for(size_t update_idx = 0; update_idx < e->trip_update->n_stop_time_update; ++update_idx){
             stu = e->trip_update->stop_time_update[update_idx];
             if(!stu->arrival)continue;
@@ -329,19 +335,24 @@ void* feedmsg_to_train_arrivals_th(void* v_f2ta_arg){
     return NULL;
 }
 
+// TODO: ensure that this returns the same n_insertions as traditional
 int concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessage* feedmsg, struct train_arrivals* ta, struct stopmap* stop_id_map, int n_threads){
-    struct f2ta_arg* f2ta_arg = malloc(sizeof(struct f2ta_arg));
+    /*struct f2ta_arg* f2ta_args = malloc(sizeof(struct f2ta_arg)*n_threads);*/
+    struct f2ta_threadinfo_arg f2ta_threadinfo[n_threads];
+    struct f2ta_arg f2ta_arg;
     pthread_t threads[n_threads];
     int ret;
 
-    f2ta_arg->feedmsg = feedmsg;
-    f2ta_arg->ta = ta;
-    f2ta_arg->stop_id_map = stop_id_map;
-    f2ta_arg->n_threads = n_threads;
-    f2ta_arg->n_insertions = 0;
+    f2ta_arg.feedmsg = feedmsg;
+    f2ta_arg.ta = ta;
+    f2ta_arg.stop_id_map = stop_id_map;
+    f2ta_arg.n_threads = n_threads;
+    f2ta_arg.n_insertions = 0;
 
     for(int i = 0; i < n_threads; ++i){
-        pthread_create(threads+i, NULL, feedmsg_to_train_arrivals_th, f2ta_arg);
+        f2ta_threadinfo[i].f2ta_arg = &f2ta_arg;
+        f2ta_threadinfo[i].thread_idx = i;
+        pthread_create(threads+i, NULL, feedmsg_to_train_arrivals_th, f2ta_threadinfo+i);
     }
 
     // TODO: should we join threads here?
@@ -349,8 +360,7 @@ int concurrent_feedmsg_to_train_arrivals(const struct TransitRealtime__FeedMessa
     for(int i = 0; i < n_threads; ++i){
         pthread_join(threads[i], NULL);
     }
-    ret = f2ta_arg->n_insertions;
-    free(f2ta_arg);
+    ret = f2ta_arg.n_insertions;
     return ret;
 }
 
@@ -371,7 +381,8 @@ int populate_train_arrivals(struct train_arrivals* ta, enum train train_line, st
      * def can actually, with minimal changes!
      * just need to 
      */
-    return feedmsg_to_train_arrivals(fm, ta, stop_id_map);
+    return concurrent_feedmsg_to_train_arrivals(fm, ta, stop_id_map, 1);
+    /*return feedmsg_to_train_arrivals(fm, ta, stop_id_map);*/
 }
 
 struct pta_arg{
